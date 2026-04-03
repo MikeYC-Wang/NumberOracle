@@ -1,5 +1,7 @@
+import time
 from collections import defaultdict
 
+from django.core.management import call_command
 from django.db.models import Count
 from rest_framework import viewsets
 from rest_framework.decorators import action
@@ -8,6 +10,10 @@ from rest_framework.response import Response
 
 from .models import LotteryGame, DrawResult
 from .serializers import LotteryGameSerializer, DrawResultSerializer
+
+# 簡易限流：記錄上次 refresh 的時間戳
+_last_refresh_time = 0.0
+_REFRESH_COOLDOWN = 60  # 秒
 
 
 class LotteryGameViewSet(viewsets.ReadOnlyModelViewSet):
@@ -289,4 +295,55 @@ class DrawResultViewSet(viewsets.ReadOnlyModelViewSet):
             },
             "top5_hot": top5_hot,
             "top5_cold": top5_cold,
+        })
+
+    # ------------------------------------------------------------------
+    # POST /api/v1/draws/refresh/
+    # ------------------------------------------------------------------
+
+    @action(detail=False, methods=['post'], url_path='refresh')
+    def refresh(self, request):
+        """即時更新最新開獎資料。"""
+        global _last_refresh_time
+
+        now = time.time()
+        if now - _last_refresh_time < _REFRESH_COOLDOWN:
+            remaining = int(_REFRESH_COOLDOWN - (now - _last_refresh_time))
+            return Response(
+                {
+                    "status": "error",
+                    "message": f"請求過於頻繁，請 {remaining} 秒後再試",
+                },
+                status=429,
+            )
+
+        # 記錄更新前各彩種的數量
+        game_codes = ['daily_cash', 'lotto649', 'super_lotto']
+        counts_before = {}
+        for code in game_codes:
+            counts_before[code] = DrawResult.objects.filter(game__code=code).count()
+
+        # 執行更新
+        _last_refresh_time = time.time()
+        try:
+            call_command('update_latest')
+        except Exception as e:
+            return Response(
+                {
+                    "status": "error",
+                    "message": f"更新失敗: {str(e)}",
+                },
+                status=500,
+            )
+
+        # 計算新增筆數
+        updated_counts = {}
+        for code in game_codes:
+            counts_after = DrawResult.objects.filter(game__code=code).count()
+            updated_counts[code] = counts_after - counts_before[code]
+
+        return Response({
+            "status": "success",
+            "message": "資料更新完成",
+            "updated_counts": updated_counts,
         })

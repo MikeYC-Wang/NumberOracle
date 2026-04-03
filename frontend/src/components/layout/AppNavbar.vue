@@ -1,10 +1,48 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8001/api/v1'
+
 const mobileMenuOpen = ref(false)
+const refreshing = ref(false)
+const refreshStatus = ref<'idle' | 'success' | 'error'>('idle')
+const refreshMessage = ref('')
 
 function toggleMenu() {
   mobileMenuOpen.value = !mobileMenuOpen.value
+}
+
+async function handleRefresh() {
+  if (refreshing.value) return
+
+  refreshing.value = true
+  refreshStatus.value = 'idle'
+  refreshMessage.value = ''
+
+  try {
+    const res = await fetch(`${API_BASE}/draws/refresh/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+    const data = await res.json()
+
+    if (res.ok) {
+      refreshStatus.value = 'success'
+      refreshMessage.value = data.message || '資料更新完成'
+    } else {
+      refreshStatus.value = 'error'
+      refreshMessage.value = data.message || `更新失敗 (${res.status})`
+    }
+  } catch (e) {
+    refreshStatus.value = 'error'
+    refreshMessage.value = '網路錯誤，無法連線後端'
+  } finally {
+    refreshing.value = false
+    setTimeout(() => {
+      refreshStatus.value = 'idle'
+      refreshMessage.value = ''
+    }, 2000)
+  }
 }
 </script>
 
@@ -44,6 +82,32 @@ function toggleMenu() {
           <router-link to="/prediction" @click="mobileMenuOpen = false">
             <i class="fas fa-magic"></i> 預測搖獎
           </router-link>
+        </li>
+        <li class="navbar__refresh-wrapper">
+          <button
+            class="navbar__refresh-btn"
+            :class="{
+              'navbar__refresh-btn--success': refreshStatus === 'success',
+              'navbar__refresh-btn--error': refreshStatus === 'error',
+            }"
+            :disabled="refreshing"
+            @click="handleRefresh"
+          >
+            <i
+              :class="
+                refreshing
+                  ? 'fas fa-spinner fa-spin'
+                  : refreshStatus === 'success'
+                    ? 'fas fa-check'
+                    : refreshStatus === 'error'
+                      ? 'fas fa-exclamation-triangle'
+                      : 'fas fa-sync-alt'
+              "
+            ></i>
+            <span v-if="refreshStatus === 'idle' && !refreshing">更新資料</span>
+            <span v-else-if="refreshing">更新中...</span>
+            <span v-else>{{ refreshMessage }}</span>
+          </button>
         </li>
       </ul>
     </div>
@@ -111,6 +175,43 @@ function toggleMenu() {
 .navbar__links a.router-link-active {
   background-color: var(--color-primary-dark);
   color: var(--color-surface);
+}
+
+.navbar__refresh-wrapper {
+  margin-left: var(--spacing-sm);
+}
+
+.navbar__refresh-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  border: none;
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 0.9375rem;
+  font-family: inherit;
+  background-color: rgba(255, 255, 255, 0.15);
+  color: var(--color-text);
+  transition: background-color 0.2s ease, opacity 0.2s ease;
+}
+
+.navbar__refresh-btn:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.25);
+}
+
+.navbar__refresh-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.navbar__refresh-btn--success {
+  color: #4ade80;
+}
+
+.navbar__refresh-btn--error {
+  color: #f87171;
 }
 
 @media (max-width: 768px) {
