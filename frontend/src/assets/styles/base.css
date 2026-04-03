@@ -111,6 +111,7 @@ ul, ol {
 /* FontAwesome 圖示微調 */
 .fa, .fas, .far, .fab {
   vertical-align: middle;
+  line-height: 1;
 }
 
 /* 滾動條樣式 (Webkit) */

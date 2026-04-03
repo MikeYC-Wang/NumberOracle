@@ -218,12 +218,14 @@ onMounted(async () => {
 }
 
 .section-title {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
   margin-bottom: var(--spacing-lg);
 }
 
 .section-title i {
   color: var(--color-primary);
-  margin-right: var(--spacing-sm);
 }
 
 .loading {
@@ -294,11 +296,13 @@ onMounted(async () => {
 }
 
 .latest-draws > h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
   margin-bottom: var(--spacing-lg);
 }
 
 .latest-draws > h2 i {
-  margin-right: var(--spacing-sm);
   color: var(--color-accent);
 }
 

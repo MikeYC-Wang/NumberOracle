@@ -21,7 +21,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
   const trendData = ref<TrendItem[]>([])
 
   // 進階分析
-  const selectedRecent = ref<number>(50)
+  const selectedRecent = ref<number>(10)
   const consecutiveTail = ref<any>(null)
   const zoneDistribution = ref<any>(null)
   const oddEvenSize = ref<any>(null)

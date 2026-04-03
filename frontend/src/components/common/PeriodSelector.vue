@@ -5,7 +5,7 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  options: () => [30, 50, 100, 200],
+  options: () => [10, 30, 50, 100, 200],
 })
 
 const emit = defineEmits<{

@@ -237,8 +237,9 @@ onMounted(async () => {
   margin-bottom: var(--spacing-xl);
 }
 
-h1 i { color: var(--color-primary); margin-right: var(--spacing-sm); }
-h2 i { margin-right: var(--spacing-sm); }
+h1, h2 { display: flex; align-items: center; gap: var(--spacing-sm); }
+h1 i { color: var(--color-primary); }
+h3 { display: flex; align-items: center; gap: var(--spacing-sm); }
 
 .loading {
   text-align: center;
