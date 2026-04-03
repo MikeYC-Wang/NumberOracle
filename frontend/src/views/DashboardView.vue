@@ -6,9 +6,20 @@ import LotteryBall from '../components/common/LotteryBall.vue'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8001/api/v1'
 
+interface GameSummary {
+  game: string
+  game_name: string
+  total_draws: number
+  date_range: { earliest: string; latest: string }
+  latest_draw: DrawResult | null
+  top5_hot: number[]
+  top5_cold: number[]
+}
+
 const lotteryStore = useLotteryStore()
 
 const latestDraws = ref<Record<string, DrawResult | null>>({})
+const gameSummaries = ref<Record<string, GameSummary | null>>({})
 const loadingDraws = ref(false)
 
 /** 根據 game code 產生對應路由路徑 */
@@ -43,14 +54,28 @@ async function fetchLatestDraw(gameCode: string) {
   }
 }
 
+async function fetchSummary(gameCode: string): Promise<GameSummary | null> {
+  try {
+    const res = await fetch(`${API_BASE}/draws/summary/?game=${gameCode}`)
+    if (!res.ok) return null
+    return (await res.json()) as GameSummary
+  } catch {
+    return null
+  }
+}
+
 onMounted(async () => {
   await lotteryStore.fetchGames()
 
   if (lotteryStore.games.length > 0) {
     loadingDraws.value = true
     const promises = lotteryStore.games.map(async (game) => {
-      const draw = await fetchLatestDraw(game.code)
+      const [draw, summary] = await Promise.all([
+        fetchLatestDraw(game.code),
+        fetchSummary(game.code),
+      ])
       latestDraws.value[game.code] = draw
+      gameSummaries.value[game.code] = summary
     })
     await Promise.all(promises)
     loadingDraws.value = false
@@ -61,11 +86,17 @@ onMounted(async () => {
 <template>
   <div class="page-content">
     <div class="container">
-      <h1>
+      <!-- Logo 區塊 -->
+      <div class="hero">
+        <img src="/NumberOracle_LOGO.svg" alt="NumberOracle Logo" class="hero__logo" />
+        <h1 class="hero__title">NumberOracle</h1>
+        <p class="hero__tagline">純歷史數據統計與機率運算的彩券分析平台</p>
+      </div>
+
+      <h2 class="section-title">
         <i class="fas fa-chart-line"></i>
-        總覽儀表板
-      </h1>
-      <p class="subtitle">NumberOracle 彩券數據分析平台</p>
+        總覽
+      </h2>
 
       <div v-if="lotteryStore.loading" class="loading">
         <i class="fas fa-spinner fa-spin"></i> 載入中...
@@ -92,6 +123,16 @@ onMounted(async () => {
               <i class="far fa-calendar-alt"></i>
               {{ game.draw_schedule }}
             </p>
+            <template v-if="gameSummaries[game.code]">
+              <p class="game-card__summary">
+                <i class="fas fa-database"></i>
+                總期數: {{ gameSummaries[game.code]!.total_draws }}
+              </p>
+              <p class="game-card__summary">
+                <i class="fas fa-calendar-check"></i>
+                資料範圍: {{ gameSummaries[game.code]!.date_range.earliest }} ~ {{ gameSummaries[game.code]!.date_range.latest }}
+              </p>
+            </template>
           </router-link>
         </div>
 
@@ -152,16 +193,35 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.subtitle {
+/* Hero / Logo */
+.hero {
+  text-align: center;
+  padding: var(--spacing-xl) 0 var(--spacing-lg);
+}
+
+.hero__logo {
+  height: 350px;
+  width: auto;
+  margin: 0 auto var(--spacing-md);
+  display: block;
+}
+
+.hero__title {
+  font-size: 2rem;
+  font-weight: 700;
+  margin-bottom: var(--spacing-xs);
+}
+
+.hero__tagline {
   color: var(--color-text-secondary);
-  margin-bottom: var(--spacing-xl);
+  font-size: 1rem;
 }
 
-h1 {
-  margin-bottom: var(--spacing-sm);
+.section-title {
+  margin-bottom: var(--spacing-lg);
 }
 
-h1 i {
+.section-title i {
   color: var(--color-primary);
   margin-right: var(--spacing-sm);
 }
@@ -215,6 +275,17 @@ h1 i {
 }
 .game-card__schedule i {
   margin-right: var(--spacing-xs);
+}
+
+.game-card__summary {
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+  margin-top: var(--spacing-xs);
+  font-family: var(--font-mono);
+}
+.game-card__summary i {
+  margin-right: var(--spacing-xs);
+  color: var(--color-primary);
 }
 
 /* 最新開獎 */

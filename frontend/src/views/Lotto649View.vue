@@ -1,14 +1,27 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useLotteryStore } from '../stores/lotteryStore'
 import { useAnalysisStore } from '../stores/analysisStore'
 import StatCard from '../components/common/StatCard.vue'
 import HotColdChart from '../components/charts/HotColdChart.vue'
 import MissingValueChart from '../components/charts/MissingValueChart.vue'
+import TrendLineChart from '../components/charts/TrendLineChart.vue'
 import DataTable from '../components/common/DataTable.vue'
 
 const GAME_CODE = 'lotto649'
 const POOL_SIZE = 49
+
+const trendInput = ref<number | null>(null)
+const trendError = ref<string | null>(null)
+
+async function queryTrend() {
+  trendError.value = null
+  if (trendInput.value === null || trendInput.value < 1 || trendInput.value > POOL_SIZE) {
+    trendError.value = `請輸入 1 ~ ${POOL_SIZE} 之間的號碼`
+    return
+  }
+  await analysisStore.fetchTrend(GAME_CODE, trendInput.value)
+}
 
 const lotteryStore = useLotteryStore()
 const analysisStore = useAnalysisStore()
@@ -87,6 +100,31 @@ onMounted(async () => {
           </section>
         </div>
 
+        <!-- 號碼追蹤 -->
+        <section class="card full-width-section trend-section">
+          <h2><i class="fas fa-crosshairs"></i> 號碼追蹤</h2>
+          <div class="trend-controls">
+            <input
+              v-model.number="trendInput"
+              type="number"
+              :min="1"
+              :max="POOL_SIZE"
+              :placeholder="`輸入號碼 (1~${POOL_SIZE})`"
+              class="trend-input"
+              @keyup.enter="queryTrend"
+            />
+            <button class="trend-btn" @click="queryTrend">
+              <i class="fas fa-search"></i> 查詢
+            </button>
+          </div>
+          <p v-if="trendError" class="trend-error">{{ trendError }}</p>
+          <TrendLineChart
+            v-if="analysisStore.trendData.length > 0 && analysisStore.trendNumber !== null"
+            :trend-data="analysisStore.trendData"
+            :number="analysisStore.trendNumber"
+          />
+        </section>
+
         <!-- 歷史開獎紀錄 -->
         <section class="card full-width-section">
           <h2><i class="fas fa-history"></i> 歷史開獎紀錄</h2>
@@ -156,6 +194,61 @@ h2 i { margin-right: var(--spacing-sm); }
   }
 }
 
+/* 號碼追蹤 */
+.trend-section h2 {
+  margin-bottom: var(--spacing-md);
+}
+
+.trend-controls {
+  display: flex;
+  gap: var(--spacing-sm);
+  align-items: center;
+  margin-bottom: var(--spacing-md);
+  flex-wrap: wrap;
+}
+
+.trend-input {
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--color-border, #DFE6E9);
+  border-radius: var(--radius-md, 8px);
+  font-size: 1rem;
+  font-family: var(--font-mono);
+  width: 180px;
+  background: var(--color-surface, #fff);
+  color: var(--color-text, #2D3436);
+}
+
+.trend-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px rgba(42, 157, 143, 0.2);
+}
+
+.trend-btn {
+  padding: var(--spacing-sm) var(--spacing-lg);
+  background: var(--color-primary);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-md, 8px);
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.trend-btn:hover {
+  opacity: 0.9;
+}
+
+.trend-btn i {
+  margin-right: var(--spacing-xs);
+}
+
+.trend-error {
+  color: var(--color-accent, #E76F51);
+  font-size: 0.875rem;
+  margin-bottom: var(--spacing-sm);
+}
+
 @media (max-width: 768px) {
   .stat-cards {
     grid-template-columns: 1fr;
@@ -164,6 +257,15 @@ h2 i { margin-right: var(--spacing-sm); }
 
   .charts-grid {
     grid-template-columns: 1fr;
+  }
+
+  .trend-input {
+    width: 100%;
+  }
+
+  .trend-controls {
+    flex-direction: column;
+    align-items: stretch;
   }
 }
 </style>

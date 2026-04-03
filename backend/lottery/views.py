@@ -1,5 +1,6 @@
 from collections import defaultdict
 
+from django.db.models import Count
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
@@ -163,4 +164,129 @@ class DrawResultViewSet(viewsets.ReadOnlyModelViewSet):
             "game": game.code,
             "as_of_term": latest_term,
             "missing_values": missing_list,
+        })
+
+    # ------------------------------------------------------------------
+    # GET /api/v1/draws/trend/?game={code}&number={N}&recent={期數}
+    # ------------------------------------------------------------------
+
+    @action(detail=False, methods=['get'], url_path='trend')
+    def trend(self, request):
+        """查詢指定號碼在近 N 期的出現走勢。"""
+        game_code = request.query_params.get('game')
+        game, err = self._get_game_or_error(game_code)
+        if err:
+            return err
+
+        # 驗證 number 參數
+        number_param = request.query_params.get('number')
+        if number_param is None:
+            return Response(
+                {"error": "query parameter 'number' is required."},
+                status=400,
+            )
+        try:
+            number = int(number_param)
+            if number < 1 or number > game.main_pool_size:
+                raise ValueError
+        except (TypeError, ValueError):
+            return Response(
+                {"error": f"'number' must be an integer between 1 and {game.main_pool_size}."},
+                status=400,
+            )
+
+        # 驗證 recent 參數
+        try:
+            recent = int(request.query_params.get('recent', 100))
+            if recent <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return Response(
+                {"error": "'recent' must be a positive integer."},
+                status=400,
+            )
+
+        draws = (
+            DrawResult.objects
+            .filter(game=game)
+            .order_by('-draw_date', '-draw_term')[:recent]
+        )
+
+        trend = []
+        for draw in draws:
+            trend.append({
+                "draw_term": draw.draw_term,
+                "draw_date": draw.draw_date.isoformat(),
+                "appeared": number in draw.numbers_sorted,
+            })
+
+        return Response({
+            "game": game.code,
+            "number": number,
+            "recent_draws": recent,
+            "trend": trend,
+        })
+
+    # ------------------------------------------------------------------
+    # GET /api/v1/draws/summary/?game={code}
+    # ------------------------------------------------------------------
+
+    @action(detail=False, methods=['get'], url_path='summary')
+    def summary(self, request):
+        """回傳指定彩種的摘要統計資訊。"""
+        game_code = request.query_params.get('game')
+        game, err = self._get_game_or_error(game_code)
+        if err:
+            return err
+
+        draws_qs = DrawResult.objects.filter(game=game)
+        total_draws = draws_qs.count()
+
+        if total_draws == 0:
+            return Response({
+                "game": game.code,
+                "game_name": game.name,
+                "total_draws": 0,
+                "date_range": {"earliest": None, "latest": None},
+                "latest_draw": None,
+                "top5_hot": [],
+                "top5_cold": [],
+            })
+
+        # 日期範圍
+        earliest_draw = draws_qs.order_by('draw_date').first()
+        latest_draw = draws_qs.order_by('-draw_date', '-draw_term').first()
+
+        # 統計所有號碼出現次數
+        counter: dict[int, int] = defaultdict(int)
+        for numbers in draws_qs.values_list('numbers_sorted', flat=True):
+            for num in numbers:
+                counter[num] += 1
+
+        # 產生完整頻率表 (確保沒出現過的號碼也有 count=0)
+        full_freq = []
+        for num in range(1, game.main_pool_size + 1):
+            full_freq.append({"number": num, "count": counter.get(num, 0)})
+
+        # top5 hot / cold
+        sorted_by_count = sorted(full_freq, key=lambda x: x["count"], reverse=True)
+        top5_hot = sorted_by_count[:5]
+        top5_cold = sorted(full_freq, key=lambda x: x["count"])[:5]
+
+        return Response({
+            "game": game.code,
+            "game_name": game.name,
+            "total_draws": total_draws,
+            "date_range": {
+                "earliest": earliest_draw.draw_date.isoformat(),
+                "latest": latest_draw.draw_date.isoformat(),
+            },
+            "latest_draw": {
+                "draw_term": latest_draw.draw_term,
+                "draw_date": latest_draw.draw_date.isoformat(),
+                "numbers_sorted": latest_draw.numbers_sorted,
+                "special_number": latest_draw.special_number,
+            },
+            "top5_hot": top5_hot,
+            "top5_cold": top5_cold,
         })

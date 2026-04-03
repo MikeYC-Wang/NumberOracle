@@ -12,7 +12,6 @@ function toggleMenu() {
   <nav class="navbar">
     <div class="navbar__inner container">
       <router-link to="/" class="navbar__brand">
-        <i class="fas fa-crystal-ball"></i>
         <span class="navbar__title">NumberOracle</span>
       </router-link>
 
@@ -77,8 +76,10 @@ function toggleMenu() {
   font-size: 1.25rem;
   text-decoration: none;
 }
-.navbar__brand i {
-  font-size: 1.5rem;
+
+.navbar__logo {
+  height: 44px;
+  width: auto;
 }
 
 .navbar__toggle {

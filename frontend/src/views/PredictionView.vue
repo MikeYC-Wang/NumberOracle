@@ -8,21 +8,104 @@ import LotteryBall from '../components/common/LotteryBall.vue'
 const lotteryStore = useLotteryStore()
 const analysisStore = useAnalysisStore()
 
+// --- 策略定義 ---
+type Strategy = 'random' | 'hot_weighted' | 'cold_weighted' | 'balanced' | 'manual'
+
+interface StrategyOption {
+  value: Strategy
+  label: string
+  description: string
+  icon: string
+}
+
+const strategies: StrategyOption[] = [
+  { value: 'random', label: '純隨機', description: '每個號碼等機率抽出', icon: 'fas fa-dice' },
+  { value: 'hot_weighted', label: '熱門加權', description: '近期常出現的號碼機率較高', icon: 'fas fa-fire' },
+  { value: 'cold_weighted', label: '冷門加權', description: '近期少出現的號碼機率較高（遺漏值高者優先）', icon: 'fas fa-snowflake' },
+  { value: 'balanced', label: '均衡策略', description: '從熱門取一半、冷門取一半', icon: 'fas fa-balance-scale' },
+  { value: 'manual', label: '手動選號', description: '自己點選號碼球', icon: 'fas fa-hand-pointer' },
+]
+
 // --- 彩種選擇 ---
 const selectedCode = ref<string>('')
-
 const currentGame = computed<LotteryGame | null>(() => lotteryStore.currentGame)
+
+// --- 策略與分析期數 ---
+const selectedStrategy = ref<Strategy>('random')
+const recentPeriods = ref(50)
+
+const showRecentInput = computed(() =>
+  selectedStrategy.value !== 'random' && selectedStrategy.value !== 'manual'
+)
 
 function onGameChange() {
   lotteryStore.selectGame(selectedCode.value)
-  if (selectedCode.value) {
-    analysisStore.fetchHotCold(selectedCode.value)
-  }
-  // 切換彩種時清除目前搖獎結果
   drawnNumbers.value = []
   specialNumber.value = null
   visibleCount.value = 0
+  clearManualSelection()
+  if (selectedCode.value && showRecentInput.value) {
+    analysisStore.fetchHotCold(selectedCode.value, recentPeriods.value)
+  }
 }
+
+function onStrategyChange() {
+  clearManualSelection()
+  drawnNumbers.value = []
+  specialNumber.value = null
+  visibleCount.value = 0
+  if (selectedCode.value && showRecentInput.value) {
+    analysisStore.fetchHotCold(selectedCode.value, recentPeriods.value)
+  }
+}
+
+function onRecentChange() {
+  if (selectedCode.value && showRecentInput.value) {
+    analysisStore.fetchHotCold(selectedCode.value, recentPeriods.value)
+  }
+}
+
+// --- 手動選號 ---
+const manualMainNumbers = ref<Set<number>>(new Set())
+const manualSpecialNumber = ref<number | null>(null)
+
+function clearManualSelection() {
+  manualMainNumbers.value = new Set()
+  manualSpecialNumber.value = null
+}
+
+function toggleMainNumber(num: number) {
+  const next = new Set(manualMainNumbers.value)
+  if (next.has(num)) {
+    next.delete(num)
+  } else {
+    if (currentGame.value && next.size >= currentGame.value.main_pick_count) return
+    next.add(num)
+  }
+  manualMainNumbers.value = next
+}
+
+function toggleSpecialNumber(num: number) {
+  if (manualSpecialNumber.value === num) {
+    manualSpecialNumber.value = null
+  } else {
+    manualSpecialNumber.value = num
+  }
+}
+
+const manualMainFull = computed(() => {
+  if (!currentGame.value) return false
+  return manualMainNumbers.value.size >= currentGame.value.main_pick_count
+})
+
+const manualComplete = computed(() => {
+  if (!currentGame.value) return false
+  const mainOk = manualMainNumbers.value.size === currentGame.value.main_pick_count
+  if (currentGame.value.has_special) {
+    return mainOk && manualSpecialNumber.value !== null
+  }
+  return mainOk
+})
 
 // --- 搖獎狀態 ---
 const isRolling = ref(false)
@@ -30,39 +113,34 @@ const drawnNumbers = ref<number[]>([])
 const specialNumber = ref<number | null>(null)
 const visibleCount = ref(0)
 
-// 總共要顯示的球數 (主號碼 + 可能的特別號)
-const totalBalls = computed(() => {
-  return drawnNumbers.value.length + (specialNumber.value !== null ? 1 : 0)
+const totalBalls = computed(() =>
+  drawnNumbers.value.length + (specialNumber.value !== null ? 1 : 0)
+)
+
+// --- 能否搖獎 ---
+const canRoll = computed(() => {
+  if (!currentGame.value || isRolling.value) return false
+  if (selectedStrategy.value === 'manual') return manualComplete.value
+  return true
 })
 
-// --- 加權隨機選號 ---
-function weightedRandomPick(poolSize: number, pickCount: number): number[] {
-  const freqs = analysisStore.frequencies
-  // 建立權重表：號碼 1 ~ poolSize
-  const weights: number[] = []
-  for (let i = 1; i <= poolSize; i++) {
-    const freq = freqs.find(f => f.number === i)
-    // 基礎權重 1，加上頻率作為額外權重 (熱門號碼權重更高)
-    weights.push(1 + (freq ? freq.count : 0))
-  }
+// --- 選號邏輯 ---
 
+/** 加權隨機抽取 (不重複) */
+function weightedPick(pool: Map<number, number>, pickCount: number): number[] {
   const picked: number[] = []
-  const usedIndices = new Set<number>()
+  const remaining = new Map(pool)
 
-  while (picked.length < pickCount) {
-    // 計算剩餘可選號碼的總權重
+  while (picked.length < pickCount && remaining.size > 0) {
     let totalWeight = 0
-    for (let i = 0; i < poolSize; i++) {
-      if (!usedIndices.has(i)) totalWeight += weights[i]
-    }
+    for (const w of remaining.values()) totalWeight += w
 
     let rand = Math.random() * totalWeight
-    for (let i = 0; i < poolSize; i++) {
-      if (usedIndices.has(i)) continue
-      rand -= weights[i]
+    for (const [num, w] of remaining) {
+      rand -= w
       if (rand <= 0) {
-        picked.push(i + 1) // 號碼 = index + 1
-        usedIndices.add(i)
+        picked.push(num)
+        remaining.delete(num)
         break
       }
     }
@@ -71,18 +149,111 @@ function weightedRandomPick(poolSize: number, pickCount: number): number[] {
   return picked.sort((a, b) => a - b)
 }
 
-function pickSpecialNumber(poolSize: number, excludeNumbers: number[]): number {
-  // 特別號從獨立的號碼池中選取 (不排除主號碼，各彩種規則不同)
-  // 威力彩特別號是獨立號碼池，其他可能從同池中選
-  const candidates: number[] = []
-  for (let i = 1; i <= poolSize; i++) {
-    candidates.push(i)
-  }
-  return candidates[Math.floor(Math.random() * candidates.length)]
+/** 純隨機 */
+function pickRandom(poolSize: number, pickCount: number): number[] {
+  const pool = new Map<number, number>()
+  for (let i = 1; i <= poolSize; i++) pool.set(i, 1)
+  return weightedPick(pool, pickCount)
 }
 
+/** 熱門加權：weight = 1 + count */
+function pickHotWeighted(poolSize: number, pickCount: number): number[] {
+  const freqs = analysisStore.frequencies
+  const pool = new Map<number, number>()
+  for (let i = 1; i <= poolSize; i++) {
+    const freq = freqs.find(f => f.number === i)
+    pool.set(i, 1 + (freq ? freq.count : 0))
+  }
+  return weightedPick(pool, pickCount)
+}
+
+/** 冷門加權：weight = 1 + (maxCount - count) */
+function pickColdWeighted(poolSize: number, pickCount: number): number[] {
+  const freqs = analysisStore.frequencies
+  const maxCount = freqs.reduce((mx, f) => Math.max(mx, f.count), 0)
+  const pool = new Map<number, number>()
+  for (let i = 1; i <= poolSize; i++) {
+    const freq = freqs.find(f => f.number === i)
+    pool.set(i, 1 + (maxCount - (freq ? freq.count : 0)))
+  }
+  return weightedPick(pool, pickCount)
+}
+
+/** 均衡策略：熱門取 ceil(n/2)、冷門取其餘 */
+function pickBalanced(poolSize: number, pickCount: number): number[] {
+  const freqs = analysisStore.frequencies
+
+  // 建立所有號碼的 count 表
+  const countMap = new Map<number, number>()
+  for (let i = 1; i <= poolSize; i++) {
+    const freq = freqs.find(f => f.number === i)
+    countMap.set(i, freq ? freq.count : 0)
+  }
+
+  // 按 count 降序排列
+  const sorted = Array.from(countMap.entries()).sort((a, b) => b[1] - a[1])
+  const half = Math.ceil(sorted.length / 2)
+  const hotGroup = sorted.slice(0, half).map(e => e[0])
+  const coldGroup = sorted.slice(half).map(e => e[0])
+
+  const hotCount = Math.ceil(pickCount / 2)
+  const coldCount = pickCount - hotCount
+
+  // 從各組隨機取
+  const hotPicked = shuffleAndTake(hotGroup, hotCount)
+  const coldPicked = shuffleAndTake(coldGroup, coldCount)
+
+  return [...hotPicked, ...coldPicked].sort((a, b) => a - b)
+}
+
+function shuffleAndTake(arr: number[], count: number): number[] {
+  const copy = [...arr]
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[copy[i], copy[j]] = [copy[j], copy[i]]
+  }
+  return copy.slice(0, count)
+}
+
+function pickSpecialNumber(poolSize: number): number {
+  return Math.floor(Math.random() * poolSize) + 1
+}
+
+function generateNumbers(game: LotteryGame): { main: number[]; special: number | null } {
+  let main: number[]
+  let special: number | null = null
+
+  switch (selectedStrategy.value) {
+    case 'random':
+      main = pickRandom(game.main_pool_size, game.main_pick_count)
+      break
+    case 'hot_weighted':
+      main = pickHotWeighted(game.main_pool_size, game.main_pick_count)
+      break
+    case 'cold_weighted':
+      main = pickColdWeighted(game.main_pool_size, game.main_pick_count)
+      break
+    case 'balanced':
+      main = pickBalanced(game.main_pool_size, game.main_pick_count)
+      break
+    case 'manual':
+      main = Array.from(manualMainNumbers.value).sort((a, b) => a - b)
+      special = game.has_special ? manualSpecialNumber.value : null
+      return { main, special }
+    default:
+      main = pickRandom(game.main_pool_size, game.main_pick_count)
+  }
+
+  if (game.has_special && game.special_pool_size) {
+    special = pickSpecialNumber(game.special_pool_size)
+  }
+
+  return { main, special }
+}
+
+// --- 搖獎動畫 ---
 async function startRolling() {
-  if (!currentGame.value || isRolling.value) return
+  if (!canRoll.value || !currentGame.value) return
 
   const game = currentGame.value
   isRolling.value = true
@@ -90,17 +261,10 @@ async function startRolling() {
   specialNumber.value = null
   visibleCount.value = 0
 
-  // 產生號碼
-  const mainNumbers = weightedRandomPick(game.main_pool_size, game.main_pick_count)
-  let special: number | null = null
-  if (game.has_special && game.special_pool_size) {
-    special = pickSpecialNumber(game.special_pool_size, mainNumbers)
-  }
+  const result = generateNumbers(game)
+  drawnNumbers.value = result.main
+  specialNumber.value = result.special
 
-  drawnNumbers.value = mainNumbers
-  specialNumber.value = special
-
-  // 依序顯示號碼球，每顆間隔 300ms
   for (let i = 1; i <= totalBalls.value; i++) {
     await delay(300)
     visibleCount.value = i
@@ -108,13 +272,16 @@ async function startRolling() {
 
   isRolling.value = false
 
-  // 加入歷史紀錄
+  const strategyLabel = strategies.find(s => s.value === selectedStrategy.value)?.label ?? ''
+
   predictionHistory.value.unshift({
     timestamp: new Date(),
     gameCode: game.code,
     gameName: game.name,
-    numbers: [...mainNumbers],
-    special,
+    strategy: selectedStrategy.value,
+    strategyLabel,
+    numbers: [...result.main],
+    special: result.special,
   })
 }
 
@@ -122,11 +289,19 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+// --- 手動選號確認 ---
+function confirmManual() {
+  if (!manualComplete.value) return
+  startRolling()
+}
+
 // --- 歷史紀錄 ---
 interface PredictionRecord {
   timestamp: Date
   gameCode: string
   gameName: string
+  strategy: Strategy
+  strategyLabel: string
   numbers: number[]
   special: number | null
 }
@@ -145,7 +320,6 @@ onMounted(async () => {
   if (lotteryStore.games.length === 0) {
     await lotteryStore.fetchGames()
   }
-  // 預設選第一個彩種
   if (lotteryStore.games.length > 0 && !selectedCode.value) {
     selectedCode.value = lotteryStore.games[0].code
     onGameChange()
@@ -160,34 +334,168 @@ onMounted(async () => {
         <i class="fas fa-magic"></i>
         預測搖獎區
       </h1>
-      <p class="subtitle">結合冷熱門加權的隨機選號體驗</p>
+      <p class="subtitle">自由選擇策略，掌握你的選號方式</p>
 
-      <!-- 彩種選擇器 -->
-      <div class="game-selector">
-        <label for="game-select">
-          <i class="fas fa-dice"></i>
-          選擇彩種
-        </label>
-        <select
-          id="game-select"
-          v-model="selectedCode"
-          @change="onGameChange"
-          :disabled="isRolling"
-        >
-          <option value="" disabled>-- 請選擇 --</option>
-          <option
-            v-for="game in lotteryStore.games"
-            :key="game.code"
-            :value="game.code"
-          >
-            {{ game.name }}
-          </option>
-        </select>
+      <!-- ====== 設定面板 ====== -->
+      <div class="settings-panel card">
+        <h2 class="settings-title">
+          <i class="fas fa-sliders-h"></i>
+          選號設定
+        </h2>
+
+        <div class="settings-grid">
+          <!-- 彩種選擇 -->
+          <div class="setting-group">
+            <label for="game-select">
+              <i class="fas fa-dice"></i>
+              彩種
+            </label>
+            <select
+              id="game-select"
+              v-model="selectedCode"
+              @change="onGameChange"
+              :disabled="isRolling"
+            >
+              <option value="" disabled>-- 請選擇 --</option>
+              <option
+                v-for="game in lotteryStore.games"
+                :key="game.code"
+                :value="game.code"
+              >
+                {{ game.name }}
+              </option>
+            </select>
+          </div>
+
+          <!-- 選號策略 -->
+          <div class="setting-group setting-group--strategy">
+            <label>
+              <i class="fas fa-chess-knight"></i>
+              選號策略
+            </label>
+            <div class="strategy-options">
+              <label
+                v-for="opt in strategies"
+                :key="opt.value"
+                class="strategy-radio"
+                :class="{ 'strategy-radio--active': selectedStrategy === opt.value }"
+              >
+                <input
+                  type="radio"
+                  name="strategy"
+                  :value="opt.value"
+                  v-model="selectedStrategy"
+                  :disabled="isRolling"
+                  @change="onStrategyChange"
+                />
+                <span class="strategy-radio__content">
+                  <span class="strategy-radio__label">
+                    <i :class="opt.icon"></i>
+                    {{ opt.label }}
+                  </span>
+                  <span class="strategy-radio__desc">{{ opt.description }}</span>
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <!-- 分析期數 -->
+          <div v-if="showRecentInput" class="setting-group">
+            <label for="recent-input">
+              <i class="fas fa-chart-bar"></i>
+              分析期數
+            </label>
+            <div class="recent-input-row">
+              <input
+                id="recent-input"
+                type="number"
+                v-model.number="recentPeriods"
+                :min="10"
+                :max="500"
+                :disabled="isRolling"
+                @change="onRecentChange"
+              />
+              <span class="recent-hint">範圍 10 ~ 500 期</span>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <!-- 搖獎動畫區 -->
+      <!-- ====== 手動選號面板 ====== -->
+      <div
+        v-if="selectedStrategy === 'manual' && currentGame"
+        class="manual-panel card"
+      >
+        <h2 class="manual-title">
+          <i class="fas fa-hand-pointer"></i>
+          手動選號
+        </h2>
+
+        <!-- 主號碼 -->
+        <div class="manual-section">
+          <div class="manual-counter">
+            已選 {{ manualMainNumbers.size }} / {{ currentGame.main_pick_count }} 個主號碼
+          </div>
+          <div class="number-grid">
+            <div
+              v-for="n in currentGame.main_pool_size"
+              :key="'main-' + n"
+              class="number-grid__cell"
+              :class="{
+                'number-grid__cell--selected': manualMainNumbers.has(n),
+                'number-grid__cell--disabled': !manualMainNumbers.has(n) && manualMainFull
+              }"
+              @click="toggleMainNumber(n)"
+            >
+              <LotteryBall
+                :number="n"
+                :type="manualMainNumbers.has(n) ? 'hot' : 'normal'"
+                size="md"
+              />
+            </div>
+          </div>
+        </div>
+
+        <!-- 特別號 -->
+        <div
+          v-if="currentGame.has_special && currentGame.special_pool_size"
+          class="manual-section"
+        >
+          <div class="manual-counter">
+            特別號：{{ manualSpecialNumber !== null ? '已選 1' : '未選' }} / 1 個
+          </div>
+          <div class="number-grid">
+            <div
+              v-for="n in currentGame.special_pool_size"
+              :key="'sp-' + n"
+              class="number-grid__cell"
+              :class="{
+                'number-grid__cell--selected': manualSpecialNumber === n
+              }"
+              @click="toggleSpecialNumber(n)"
+            >
+              <LotteryBall
+                :number="n"
+                :type="manualSpecialNumber === n ? 'special' : 'normal'"
+                size="md"
+              />
+            </div>
+          </div>
+        </div>
+
+        <button
+          class="confirm-btn"
+          :disabled="!manualComplete || isRolling"
+          @click="confirmManual"
+        >
+          <i class="fas fa-check-circle"></i>
+          確認選號
+        </button>
+      </div>
+
+      <!-- ====== 搖獎動畫區 ====== -->
       <div class="prediction-area card">
-        <!-- 未選彩種時的提示 -->
+        <!-- 未選彩種 -->
         <div v-if="!currentGame" class="empty-state">
           <i class="fas fa-hand-pointer fa-3x"></i>
           <p>請先選擇彩種開始搖獎</p>
@@ -254,11 +562,12 @@ onMounted(async () => {
             </template>
           </div>
 
-          <!-- 搖獎按鈕 -->
+          <!-- 搖獎按鈕 (非手動時顯示) -->
           <button
+            v-if="selectedStrategy !== 'manual'"
             class="roll-btn"
             :class="{ 'roll-btn--rolling': isRolling }"
-            :disabled="isRolling"
+            :disabled="!canRoll"
             @click="startRolling"
           >
             <i :class="isRolling ? 'fas fa-spinner fa-spin' : 'fas fa-random'"></i>
@@ -267,7 +576,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- 歷史預測紀錄 -->
+      <!-- ====== 歷史預測紀錄 ====== -->
       <div v-if="predictionHistory.length > 0" class="history-section">
         <h2>
           <i class="fas fa-history"></i>
@@ -285,6 +594,10 @@ onMounted(async () => {
                 {{ formatTime(record.timestamp) }}
               </span>
               <span class="history-game">{{ record.gameName }}</span>
+              <span class="history-strategy">
+                <i class="fas fa-chess-knight"></i>
+                {{ record.strategyLabel }}
+              </span>
             </div>
             <div class="history-balls">
               <LotteryBall
@@ -320,23 +633,41 @@ h1 i {
   margin-right: var(--spacing-sm);
 }
 
-/* === 彩種選擇器 === */
-.game-selector {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-md);
+/* ====== 設定面板 ====== */
+.settings-panel {
+  margin-bottom: var(--spacing-lg);
+  padding: var(--spacing-lg);
+}
+.settings-title {
+  font-size: 1.15rem;
   margin-bottom: var(--spacing-lg);
 }
-.game-selector label {
+.settings-title i {
+  color: var(--color-primary);
+  margin-right: var(--spacing-sm);
+}
+.settings-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-lg);
+}
+.setting-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+.setting-group > label {
   font-weight: 600;
   color: var(--color-text);
   white-space: nowrap;
+  font-size: 0.95rem;
 }
-.game-selector label i {
+.setting-group > label i {
   color: var(--color-primary-dark);
   margin-right: var(--spacing-xs);
 }
-.game-selector select {
+.setting-group select,
+.setting-group input[type="number"] {
   padding: var(--spacing-sm) var(--spacing-md);
   border: 2px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -348,12 +679,158 @@ h1 i {
   transition: border-color 0.2s;
   min-width: 180px;
 }
-.game-selector select:focus {
+.setting-group select:focus,
+.setting-group input[type="number"]:focus {
   outline: none;
   border-color: var(--color-primary);
 }
+.setting-group input[type="number"] {
+  min-width: 100px;
+  max-width: 120px;
+}
 
-/* === 搖獎主區域 === */
+.setting-group--strategy {
+  flex-basis: 100%;
+}
+
+/* 策略 radio 組 */
+.strategy-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+}
+.strategy-radio {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  transition: border-color 0.2s, background 0.2s;
+  flex: 1 1 180px;
+  max-width: 260px;
+}
+.strategy-radio:hover {
+  border-color: var(--color-primary);
+}
+.strategy-radio--active {
+  border-color: var(--color-accent);
+  background: rgba(231, 111, 81, 0.06);
+}
+.strategy-radio input[type="radio"] {
+  margin-right: var(--spacing-sm);
+  accent-color: var(--color-accent);
+  flex-shrink: 0;
+}
+.strategy-radio__content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.strategy-radio__label {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--color-text);
+}
+.strategy-radio__label i {
+  margin-right: var(--spacing-xs);
+  font-size: 0.85rem;
+  color: var(--color-primary-dark);
+}
+.strategy-radio__desc {
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+  line-height: 1.3;
+}
+
+/* 分析期數 */
+.recent-input-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+.recent-hint {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+/* ====== 手動選號面板 ====== */
+.manual-panel {
+  margin-bottom: var(--spacing-lg);
+  padding: var(--spacing-lg);
+}
+.manual-title {
+  font-size: 1.15rem;
+  margin-bottom: var(--spacing-md);
+}
+.manual-title i {
+  color: var(--color-accent);
+  margin-right: var(--spacing-sm);
+}
+.manual-section {
+  margin-bottom: var(--spacing-lg);
+}
+.manual-counter {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--spacing-sm);
+}
+
+.number-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(48px, 1fr));
+  gap: 8px;
+  width: 100%;
+}
+.number-grid__cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  padding: 2px;
+  transition: transform 0.15s, opacity 0.15s;
+}
+.number-grid__cell:hover {
+  transform: scale(1.15);
+}
+.number-grid__cell--selected {
+  transform: scale(1.1);
+}
+.number-grid__cell--disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.confirm-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-lg);
+  background: linear-gradient(135deg, var(--color-accent), var(--color-accent-dark));
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-full);
+  font-size: 1rem;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s, opacity 0.2s;
+  box-shadow: 0 4px 12px rgba(231, 111, 81, 0.3);
+}
+.confirm-btn:hover:not(:disabled) {
+  transform: scale(1.05);
+  box-shadow: 0 6px 18px rgba(231, 111, 81, 0.45);
+}
+.confirm-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ====== 搖獎主區域 ====== */
 .prediction-area {
   min-height: 360px;
   display: flex;
@@ -505,7 +982,7 @@ h1 i {
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
 }
 
-/* === 歷史紀錄 === */
+/* ====== 歷史紀錄 ====== */
 .history-section {
   margin-top: var(--spacing-2xl);
 }
@@ -556,6 +1033,15 @@ h1 i {
   font-size: 0.8rem;
   font-weight: 600;
 }
+.history-strategy {
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+}
+.history-strategy i {
+  margin-right: 4px;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
 
 .history-balls {
   display: flex;
@@ -573,8 +1059,17 @@ h1 i {
   transform: scale(0.3);
 }
 
-/* === RWD === */
+/* ====== RWD ====== */
 @media (max-width: 600px) {
+  .settings-grid {
+    flex-direction: column;
+  }
+  .strategy-options {
+    flex-direction: column;
+  }
+  .strategy-radio {
+    max-width: 100%;
+  }
   .prediction-area {
     min-height: 280px;
   }
@@ -584,6 +1079,10 @@ h1 i {
   .history-item {
     flex-direction: column;
     align-items: flex-start;
+  }
+  .number-grid {
+    grid-template-columns: repeat(auto-fill, minmax(32px, 1fr));
+    gap: 4px;
   }
 }
 </style>
