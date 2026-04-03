@@ -1,0 +1,67 @@
+/*
+ * NumberOracle 色彩計畫
+ * 風格：方案 B「清爽便當風」- 台式微復古 + 現代扁平化
+ */
+
+:root {
+  /* 主要色彩 */
+  --color-bg: #F4F1DE;              /* 暖白/米黃 - 背景色 */
+  --color-primary: #E9C46A;         /* 炸排骨黃 - Navbar、主按鈕 */
+  --color-secondary: #2A9D8F;       /* 燙青菜綠 - 正向數據標籤 */
+  --color-accent: #E76F51;          /* 辣椒紅 - 熱門號、警示 */
+
+  /* 衍生色彩 */
+  --color-primary-dark: #D4A843;
+  --color-primary-light: #F2D98B;
+  --color-secondary-dark: #228176;
+  --color-secondary-light: #3DC2B2;
+  --color-accent-dark: #C95A3E;
+  --color-accent-light: #F09580;
+
+  /* 中性色 */
+  --color-text: #2D3436;
+  --color-text-secondary: #636E72;
+  --color-text-muted: #B2BEC3;
+  --color-border: #DFE6E9;
+  --color-surface: #FFFFFF;
+  --color-surface-hover: #FAFAF5;
+
+  /* 號碼球狀態色 */
+  --color-ball-hot: #E76F51;         /* 熱門號碼 */
+  --color-ball-cold: #2A9D8F;        /* 冷門號碼 */
+  --color-ball-normal: #E9C46A;      /* 一般號碼 */
+  --color-ball-special: #6C5CE7;     /* 特別號 */
+
+  /* 字型 */
+  --font-sans: 'Noto Sans TC', system-ui, -apple-system, sans-serif;
+  --font-heading: 'Noto Sans TC', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+
+  /* 間距 */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --spacing-2xl: 48px;
+
+  /* 圓角 */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 50%;
+
+  /* 陰影 */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+
+  /* RWD 斷點 (參考用，實際以 media query 為準) */
+  --breakpoint-sm: 768px;
+  --breakpoint-md: 1024px;
+  --breakpoint-lg: 1440px;
+
+  /* Navbar 高度 */
+  --navbar-height: 64px;
+  --sidebar-width: 240px;
+}
