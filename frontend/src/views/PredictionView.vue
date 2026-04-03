@@ -113,6 +113,12 @@ const drawnNumbers = ref<number[]>([])
 const specialNumber = ref<number | null>(null)
 const visibleCount = ref(0)
 
+// --- 特效狀態 ---
+const isShaking = ref(false)
+const scrambleValues = ref<Map<number, number>>(new Map())
+const scrambleIndex = ref(-1)
+const glowIndices = ref<Set<number>>(new Set())
+
 const totalBalls = computed(() =>
   drawnNumbers.value.length + (specialNumber.value !== null ? 1 : 0)
 )
@@ -252,24 +258,81 @@ function generateNumbers(game: LotteryGame): { main: number[]; special: number |
 }
 
 // --- 搖獎動畫 ---
+
+/** 跑馬燈：在指定位置快速切換隨機數字 */
+async function runScramble(index: number, poolSize: number): Promise<void> {
+  scrambleIndex.value = index
+  const iterations = 8 + Math.floor(Math.random() * 3) // 8~10 次
+  for (let i = 0; i < iterations; i++) {
+    const randomNum = Math.floor(Math.random() * poolSize) + 1
+    scrambleValues.value = new Map(scrambleValues.value.set(index, randomNum))
+    await delay(50)
+  }
+  scrambleIndex.value = -1
+}
+
+/** 觸發光暈效果 */
+function triggerGlow(index: number) {
+  glowIndices.value = new Set(glowIndices.value.add(index))
+  setTimeout(() => {
+    const next = new Set(glowIndices.value)
+    next.delete(index)
+    glowIndices.value = next
+  }, 600)
+}
+
 async function startRolling() {
   if (!canRoll.value || !currentGame.value) return
 
   const game = currentGame.value
+  const isManual = selectedStrategy.value === 'manual'
+
   isRolling.value = true
   drawnNumbers.value = []
   specialNumber.value = null
   visibleCount.value = 0
+  scrambleIndex.value = -1
+  scrambleValues.value = new Map()
+  glowIndices.value = new Set()
 
   const result = generateNumbers(game)
   drawnNumbers.value = result.main
   specialNumber.value = result.special
 
-  for (let i = 1; i <= totalBalls.value; i++) {
-    await delay(300)
-    visibleCount.value = i
+  // 1. 搖晃 + 背景漸變
+  isShaking.value = true
+  await delay(1500)
+  isShaking.value = false
+
+  // 2. 依序顯示每顆球
+  const allBalls = [...result.main]
+  const poolForScramble = game.main_pool_size
+
+  for (let i = 0; i < allBalls.length; i++) {
+    // 跑馬燈（手動選號不需要）
+    if (!isManual) {
+      await runScramble(i, poolForScramble)
+    }
+    // 彈跳落地 + 光暈
+    triggerGlow(i)
+    visibleCount.value = i + 1
+    if (i < allBalls.length - 1 || specialNumber.value !== null) {
+      await delay(200)
+    }
   }
 
+  // 特別號
+  if (specialNumber.value !== null) {
+    const spIdx = allBalls.length // 特別號 index
+    if (!isManual) {
+      await runScramble(spIdx, game.special_pool_size ?? game.main_pool_size)
+    }
+    triggerGlow(spIdx)
+    visibleCount.value = allBalls.length + 1
+  }
+
+  // 3. 等球動畫完成後移除 rolling 狀態
+  await delay(600)
   isRolling.value = false
 
   const strategyLabel = strategies.find(s => s.value === selectedStrategy.value)?.label ?? ''
@@ -494,7 +557,13 @@ onMounted(async () => {
       </div>
 
       <!-- ====== 搖獎動畫區 ====== -->
-      <div class="prediction-area card">
+      <div
+        class="prediction-area card"
+        :class="{
+          'prediction-area--shaking': isShaking,
+          'prediction-area--rolling': isRolling,
+        }"
+      >
         <!-- 未選彩種 -->
         <div v-if="!currentGame" class="empty-state">
           <i class="fas fa-hand-pointer fa-3x"></i>
@@ -533,30 +602,55 @@ onMounted(async () => {
 
             <template v-else>
               <div class="drawn-balls">
-                <TransitionGroup name="ball-pop">
+                <div
+                  v-for="(num, idx) in drawnNumbers"
+                  :key="'main-' + num"
+                  class="ball-wrapper"
+                >
+                  <!-- 跑馬燈 overlay -->
+                  <span
+                    v-if="scrambleIndex === idx"
+                    class="scramble-overlay scramble-overlay--hot"
+                  >
+                    {{ scrambleValues.get(idx) ?? '?' }}
+                  </span>
+                  <!-- 真正的球 -->
                   <LotteryBall
-                    v-for="(num, idx) in drawnNumbers"
-                    :key="'main-' + num"
                     :number="num"
                     type="hot"
                     size="lg"
                     class="ball-animated"
-                    :class="{ 'ball-visible': idx < visibleCount }"
+                    :class="{
+                      'ball-visible': idx < visibleCount,
+                      'ball-glow ball-glow--hot': glowIndices.has(idx),
+                    }"
                   />
-                </TransitionGroup>
+                </div>
 
                 <template v-if="currentGame.has_special && specialNumber !== null">
                   <span
                     class="plus-sign plus-sign--large"
                     :class="{ 'ball-visible': visibleCount > drawnNumbers.length }"
                   >+</span>
-                  <LotteryBall
-                    :number="specialNumber"
-                    type="special"
-                    size="lg"
-                    class="ball-animated"
-                    :class="{ 'ball-visible': visibleCount > drawnNumbers.length }"
-                  />
+                  <div class="ball-wrapper">
+                    <!-- 跑馬燈 overlay (特別號) -->
+                    <span
+                      v-if="scrambleIndex === drawnNumbers.length"
+                      class="scramble-overlay scramble-overlay--special"
+                    >
+                      {{ scrambleValues.get(drawnNumbers.length) ?? '?' }}
+                    </span>
+                    <LotteryBall
+                      :number="specialNumber"
+                      type="special"
+                      size="lg"
+                      class="ball-animated"
+                      :class="{
+                        'ball-visible': visibleCount > drawnNumbers.length,
+                        'ball-glow ball-glow--special': glowIndices.has(drawnNumbers.length),
+                      }"
+                    />
+                  </div>
                 </template>
               </div>
             </template>
@@ -840,6 +934,31 @@ h1 i {
   border-radius: var(--radius-xl);
   position: relative;
   overflow: hidden;
+  transition: background 1s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* --- 搖晃動畫 --- */
+@keyframes shake {
+  0%   { transform: translateX(0) rotate(0deg); }
+  10%  { transform: translateX(-4px) rotate(-1deg); }
+  20%  { transform: translateX(4px) rotate(1deg); }
+  30%  { transform: translateX(-4px) rotate(-0.8deg); }
+  40%  { transform: translateX(3px) rotate(0.8deg); }
+  50%  { transform: translateX(-3px) rotate(-0.6deg); }
+  60%  { transform: translateX(2px) rotate(0.5deg); }
+  70%  { transform: translateX(-2px) rotate(-0.3deg); }
+  80%  { transform: translateX(1px) rotate(0.2deg); }
+  90%  { transform: translateX(-1px) rotate(-0.1deg); }
+  100% { transform: translateX(0) rotate(0deg); }
+}
+
+.prediction-area--shaking {
+  animation: shake 1.5s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+/* --- 背景漸變 --- */
+.prediction-area--rolling {
+  background: linear-gradient(145deg, #fff5ee 0%, #ffecd2 40%, #fcb69f 100%);
 }
 
 .empty-state {
@@ -937,16 +1056,82 @@ h1 i {
   transform: scale(1);
 }
 
-/* 號碼球動畫 */
+/* 號碼球動畫 — 彈跳落地 */
+@keyframes bounce-in {
+  0%   { transform: translateY(-60px) scale(0.3); opacity: 0; }
+  50%  { transform: translateY(0) scale(1.05); opacity: 1; }
+  70%  { transform: translateY(-12px) scale(0.98); opacity: 1; }
+  85%  { transform: translateY(0) scale(1.02); opacity: 1; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+
 .ball-animated {
   opacity: 0;
-  transform: scale(0.3) rotateY(180deg);
-  transition: opacity 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
-              transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transform: translateY(-60px) scale(0.3);
 }
 .ball-animated.ball-visible {
-  opacity: 1;
-  transform: scale(1) rotateY(0deg);
+  animation: bounce-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+/* --- 球容器（跑馬燈定位用） --- */
+.ball-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* --- 跑馬燈 overlay --- */
+.scramble-overlay {
+  position: absolute;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 50px;
+  height: 50px;
+  border-radius: var(--radius-full);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 20px;
+  color: #fff;
+  pointer-events: none;
+}
+.scramble-overlay--hot {
+  background: linear-gradient(135deg, var(--color-accent-light), var(--color-ball-hot));
+}
+.scramble-overlay--special {
+  background: linear-gradient(135deg, #a29bfe, var(--color-ball-special));
+}
+
+/* --- 光暈脈衝 --- */
+@keyframes glow-pulse {
+  0%   { transform: scale(0.8); opacity: 0.6; }
+  100% { transform: scale(2); opacity: 0; }
+}
+
+.ball-glow {
+  position: relative;
+}
+.ball-glow::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-full);
+  animation: glow-pulse 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  pointer-events: none;
+}
+.ball-glow--hot::after {
+  box-shadow: 0 0 0 0 rgba(231, 111, 81, 0.5);
+  background: radial-gradient(circle, rgba(231, 111, 81, 0.35) 0%, transparent 70%);
+}
+.ball-glow--special::after {
+  box-shadow: 0 0 0 0 rgba(162, 155, 254, 0.5);
+  background: radial-gradient(circle, rgba(162, 155, 254, 0.35) 0%, transparent 70%);
+}
+.ball-glow--normal::after {
+  box-shadow: 0 0 0 0 rgba(241, 196, 15, 0.5);
+  background: radial-gradient(circle, rgba(241, 196, 15, 0.35) 0%, transparent 70%);
 }
 
 /* === 搖獎按鈕 === */
@@ -977,11 +1162,6 @@ h1 i {
   cursor: not-allowed;
   opacity: 0.8;
 }
-.roll-btn--rolling {
-  background: linear-gradient(135deg, var(--color-text-muted), var(--color-text-secondary));
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
-}
-
 /* ====== 歷史紀錄 ====== */
 .history-section {
   margin-top: var(--spacing-2xl);
@@ -1050,13 +1230,19 @@ h1 i {
   flex-wrap: wrap;
 }
 
-/* === TransitionGroup === */
+/* === TransitionGroup (legacy, kept for compatibility) === */
 .ball-pop-enter-active {
   transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 .ball-pop-enter-from {
   opacity: 0;
   transform: scale(0.3);
+}
+
+/* --- 搖獎過程中搖獎按鈕 --- */
+.roll-btn--rolling {
+  background: linear-gradient(135deg, var(--color-text-muted), var(--color-text-secondary));
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
 }
 
 /* ====== RWD ====== */

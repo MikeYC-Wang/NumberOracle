@@ -53,6 +53,7 @@ watch(() => props.missingValues, updateChart, { deep: true })
 .chart-scroll-wrapper {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  max-width: 100%;
 }
 
 .missing-value-chart {

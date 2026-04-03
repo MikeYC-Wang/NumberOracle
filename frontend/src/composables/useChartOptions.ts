@@ -117,11 +117,33 @@ export function getHotColdBarOptions(
 /**
  * 遺漏值柱狀圖 option
  */
+/**
+ * 遺漏值依高低在藍(低)→紫(中)→紅(高)之間漸變
+ */
+function getMissingColor(value: number, min: number, max: number): string {
+  if (max === min) return COLORS.special
+  const ratio = (value - min) / (max - min)
+  // #2A9D8F (綠/低) -> #6C5CE7 (紫/中) -> #E76F51 (紅/高)
+  const r = Math.round(ratio < 0.5
+    ? 0x2A + (0x6C - 0x2A) * (ratio / 0.5)
+    : 0x6C + (0xE7 - 0x6C) * ((ratio - 0.5) / 0.5))
+  const g = Math.round(ratio < 0.5
+    ? 0x9D + (0x5C - 0x9D) * (ratio / 0.5)
+    : 0x5C + (0x6F - 0x5C) * ((ratio - 0.5) / 0.5))
+  const b = Math.round(ratio < 0.5
+    ? 0x8F + (0xE7 - 0x8F) * (ratio / 0.5)
+    : 0xE7 + (0x51 - 0xE7) * ((ratio - 0.5) / 0.5))
+  return `rgb(${r}, ${g}, ${b})`
+}
+
 export function getMissingValueOptions(
   data: MissingValue[],
 ): EChartsOption {
   const numbers = data.map((d) => String(d.number))
   const values = data.map((d) => d.missing_draws)
+
+  const minVal = Math.min(...values)
+  const maxVal = Math.max(...values)
 
   return {
     tooltip: {
@@ -165,7 +187,7 @@ export function getMissingValueOptions(
         data: values.map((v) => ({
           value: v,
           itemStyle: {
-            color: COLORS.special,
+            color: getMissingColor(v, minVal, maxVal),
             borderRadius: [3, 3, 0, 0],
           },
         })),

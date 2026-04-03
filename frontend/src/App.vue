@@ -26,5 +26,6 @@ import AppFooter from './components/layout/AppFooter.vue'
 
 .app-main {
   flex: 1;
+  overflow-x: hidden;
 }
 </style>

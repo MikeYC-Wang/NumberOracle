@@ -1,11 +1,17 @@
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, watch, onMounted } from 'vue'
 import { useLotteryStore } from '../stores/lotteryStore'
 import { useAnalysisStore } from '../stores/analysisStore'
 import StatCard from '../components/common/StatCard.vue'
+import PeriodSelector from '../components/common/PeriodSelector.vue'
 import HotColdChart from '../components/charts/HotColdChart.vue'
 import MissingValueChart from '../components/charts/MissingValueChart.vue'
 import TrendLineChart from '../components/charts/TrendLineChart.vue'
+import ConsecutiveTailChart from '../components/charts/ConsecutiveTailChart.vue'
+import ZoneDistributionChart from '../components/charts/ZoneDistributionChart.vue'
+import OddEvenSizeChart from '../components/charts/OddEvenSizeChart.vue'
+import AcValueChart from '../components/charts/AcValueChart.vue'
+import PairFrequencyChart from '../components/charts/PairFrequencyChart.vue'
 import DataTable from '../components/common/DataTable.vue'
 
 const GAME_CODE = 'daily_cash'
@@ -39,12 +45,32 @@ const hottestNumber = computed(() => {
   return sorted[0].number
 })
 
+async function fetchAdvanced() {
+  const recent = analysisStore.selectedRecent
+  await Promise.all([
+    analysisStore.fetchConsecutiveTail(GAME_CODE, recent),
+    analysisStore.fetchZoneDistribution(GAME_CODE, recent),
+    analysisStore.fetchOddEvenSize(GAME_CODE, recent),
+    analysisStore.fetchAcValue(GAME_CODE, recent),
+    analysisStore.fetchPairFrequency(GAME_CODE, recent),
+  ])
+}
+
+watch(() => analysisStore.selectedRecent, async () => {
+  await Promise.all([
+    analysisStore.fetchHotCold(GAME_CODE, analysisStore.selectedRecent),
+    analysisStore.fetchMissingValues(GAME_CODE),
+    fetchAdvanced(),
+  ])
+})
+
 onMounted(async () => {
   lotteryStore.selectGame(GAME_CODE)
   await Promise.all([
     analysisStore.fetchDraws(GAME_CODE),
-    analysisStore.fetchHotCold(GAME_CODE),
+    analysisStore.fetchHotCold(GAME_CODE, analysisStore.selectedRecent),
     analysisStore.fetchMissingValues(GAME_CODE),
+    fetchAdvanced(),
   ])
 })
 </script>
@@ -83,6 +109,9 @@ onMounted(async () => {
           />
         </div>
 
+        <!-- 期數篩選 -->
+        <PeriodSelector v-model="analysisStore.selectedRecent" />
+
         <!-- 圖表區 -->
         <div class="charts-grid">
           <section class="card">
@@ -91,12 +120,60 @@ onMounted(async () => {
               :frequencies="analysisStore.frequencies"
               :pool-size="POOL_SIZE"
             />
+            <p class="chart-note"><i class="fas fa-info-circle"></i> 統計近 {{ analysisStore.selectedRecent }} 期每個號碼的出現次數，紅色為熱門、綠色為冷門</p>
           </section>
           <section class="card">
             <h2><i class="fas fa-search"></i> 遺漏值分析</h2>
             <MissingValueChart
               :missing-values="analysisStore.missingValues"
             />
+            <p class="chart-note"><i class="fas fa-info-circle"></i> 每個號碼距離上次開出已間隔幾期，綠色=近期出現、紅色=長期未開</p>
+          </section>
+        </div>
+
+        <!-- 進階分析 -->
+        <h2 class="section-title"><i class="fas fa-chart-pie"></i> 進階分析</h2>
+        <div class="advanced-grid">
+          <section class="card">
+            <h3>連號/同尾分析</h3>
+            <ConsecutiveTailChart
+              v-if="analysisStore.consecutiveTail"
+              :data="analysisStore.consecutiveTail"
+            />
+            <p class="chart-note"><i class="fas fa-info-circle"></i> 左：近 {{ analysisStore.selectedRecent }} 期中連續號碼對數的分布；右：尾數 0~9 各出現幾次</p>
+          </section>
+          <section class="card">
+            <h3>區間分布</h3>
+            <ZoneDistributionChart
+              v-if="analysisStore.zoneDistribution?.zones"
+              :zones="analysisStore.zoneDistribution.zones"
+            />
+            <p class="chart-note"><i class="fas fa-info-circle"></i> 將號碼分為每 10 個一區間，統計近 {{ analysisStore.selectedRecent }} 期各區間被開出的次數</p>
+          </section>
+          <section class="card">
+            <h3>奇偶比/大小比</h3>
+            <OddEvenSizeChart
+              v-if="analysisStore.oddEvenSize?.data"
+              :data="analysisStore.oddEvenSize.data"
+            />
+            <p class="chart-note"><i class="fas fa-info-circle"></i> 每期開獎號碼中奇數/偶數及大號/小號的個數走勢</p>
+          </section>
+          <section class="card">
+            <h3>AC 值分析</h3>
+            <AcValueChart
+              v-if="analysisStore.acValue?.data && analysisStore.acValue?.summary"
+              :data="analysisStore.acValue.data"
+              :summary="analysisStore.acValue.summary"
+            />
+            <p class="chart-note"><i class="fas fa-info-circle"></i> AC 值 = 號碼兩兩差值的不重複個數 - (開出球數-1)，數值越高代表號碼越分散</p>
+          </section>
+          <section class="card advanced-full">
+            <h3>號碼組合頻率</h3>
+            <PairFrequencyChart
+              v-if="analysisStore.pairFrequency?.top_pairs"
+              :pairs="analysisStore.pairFrequency.top_pairs"
+            />
+            <p class="chart-note"><i class="fas fa-info-circle"></i> 近 {{ analysisStore.selectedRecent }} 期中最常同時出現的兩個號碼組合 (前 20 名)</p>
           </section>
         </div>
 
@@ -171,6 +248,7 @@ h2 i { margin-right: var(--spacing-sm); }
 .charts-grid .card {
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 .charts-grid .card :deep(.hot-cold-chart),
@@ -179,12 +257,52 @@ h2 i { margin-right: var(--spacing-sm); }
   min-height: 320px;
 }
 
+.section-title {
+  margin-bottom: var(--spacing-md);
+}
+
+.advanced-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--spacing-lg);
+  margin-bottom: var(--spacing-lg);
+}
+
+.advanced-grid .card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.advanced-grid .card h3 {
+  margin-bottom: var(--spacing-sm);
+  font-size: 1rem;
+  color: var(--color-text, #2D3436);
+}
+
+.advanced-full {
+  grid-column: 1 / -1;
+}
+
 .full-width-section {
   margin-bottom: var(--spacing-lg);
 }
 
 .full-width-section h2 {
   margin-bottom: var(--spacing-md);
+}
+
+.chart-note {
+  margin-top: var(--spacing-sm);
+  padding-top: var(--spacing-sm);
+  border-top: 1px dashed var(--color-border);
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+.chart-note i {
+  margin-right: var(--spacing-xs);
+  color: var(--color-primary-dark);
 }
 
 @media (max-width: 1024px) {
@@ -256,6 +374,10 @@ h2 i { margin-right: var(--spacing-sm); }
   }
 
   .charts-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .advanced-grid {
     grid-template-columns: 1fr;
   }
 

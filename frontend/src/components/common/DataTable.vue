@@ -129,6 +129,7 @@ const visiblePages = computed(() => {
 
 .data-table {
   width: 100%;
+  min-width: 560px;
   border-collapse: collapse;
   font-family: var(--font-sans);
   font-size: 14px;
@@ -179,7 +180,7 @@ const visiblePages = computed(() => {
 
 .data-table__numbers {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: var(--spacing-xs);
 }
 

@@ -20,6 +20,14 @@ export const useAnalysisStore = defineStore('analysis', () => {
   const trendNumber = ref<number | null>(null)
   const trendData = ref<TrendItem[]>([])
 
+  // 進階分析
+  const selectedRecent = ref<number>(50)
+  const consecutiveTail = ref<any>(null)
+  const zoneDistribution = ref<any>(null)
+  const oddEvenSize = ref<any>(null)
+  const acValue = ref<any>(null)
+  const pairFrequency = ref<any>(null)
+
   async function fetchDraws(gameCode: string) {
     loading.value = true
     error.value = null
@@ -96,6 +104,60 @@ export const useAnalysisStore = defineStore('analysis', () => {
     }
   }
 
+  async function fetchConsecutiveTail(gameCode: string, recent: number) {
+    try {
+      const res = await fetch(`${API_BASE}/draws/consecutive_tail/?game=${gameCode}&recent=${recent}`)
+      if (!res.ok) throw new Error(`API 錯誤: ${res.status}`)
+      consecutiveTail.value = await res.json()
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : '載入失敗'
+    }
+  }
+
+  async function fetchZoneDistribution(gameCode: string, recent: number) {
+    try {
+      const res = await fetch(`${API_BASE}/draws/zone_distribution/?game=${gameCode}&recent=${recent}`)
+      if (!res.ok) throw new Error(`API 錯誤: ${res.status}`)
+      zoneDistribution.value = await res.json()
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : '載入失敗'
+    }
+  }
+
+  async function fetchOddEvenSize(gameCode: string, recent: number) {
+    try {
+      const res = await fetch(`${API_BASE}/draws/odd_even_size/?game=${gameCode}&recent=${recent}`)
+      if (!res.ok) throw new Error(`API 錯誤: ${res.status}`)
+      oddEvenSize.value = await res.json()
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : '載入失敗'
+    }
+  }
+
+  async function fetchAcValue(gameCode: string, recent: number) {
+    try {
+      const res = await fetch(`${API_BASE}/draws/ac_value/?game=${gameCode}&recent=${recent}`)
+      if (!res.ok) throw new Error(`API 錯誤: ${res.status}`)
+      acValue.value = await res.json()
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : '載入失敗'
+    }
+  }
+
+  async function fetchPairFrequency(gameCode: string, recent: number, top?: number) {
+    try {
+      const params = new URLSearchParams({ game: gameCode, recent: String(recent) })
+      if (top !== undefined) {
+        params.set('top', String(top))
+      }
+      const res = await fetch(`${API_BASE}/draws/pair_frequency/?${params}`)
+      if (!res.ok) throw new Error(`API 錯誤: ${res.status}`)
+      pairFrequency.value = await res.json()
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : '載入失敗'
+    }
+  }
+
   function clearDraws() {
     draws.value = []
     totalCount.value = 0
@@ -103,6 +165,11 @@ export const useAnalysisStore = defineStore('analysis', () => {
     missingValues.value = []
     trendNumber.value = null
     trendData.value = []
+    consecutiveTail.value = null
+    zoneDistribution.value = null
+    oddEvenSize.value = null
+    acValue.value = null
+    pairFrequency.value = null
   }
 
   return {
@@ -114,10 +181,21 @@ export const useAnalysisStore = defineStore('analysis', () => {
     trendData,
     loading,
     error,
+    selectedRecent,
+    consecutiveTail,
+    zoneDistribution,
+    oddEvenSize,
+    acValue,
+    pairFrequency,
     fetchDraws,
     fetchHotCold,
     fetchMissingValues,
     fetchTrend,
+    fetchConsecutiveTail,
+    fetchZoneDistribution,
+    fetchOddEvenSize,
+    fetchAcValue,
+    fetchPairFrequency,
     clearDraws,
   }
 })

@@ -1,5 +1,7 @@
+import math
 import time
 from collections import defaultdict
+from itertools import combinations
 
 from django.core.management import call_command
 from django.db.models import Count
@@ -346,4 +348,284 @@ class DrawResultViewSet(viewsets.ReadOnlyModelViewSet):
             "status": "success",
             "message": "資料更新完成",
             "updated_counts": updated_counts,
+        })
+
+    # ------------------------------------------------------------------
+    # helpers (shared validation)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_recent(request, default=100):
+        """Parse and validate the 'recent' query param."""
+        try:
+            recent = int(request.query_params.get('recent', default))
+            if recent <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return None, Response(
+                {"error": "'recent' must be a positive integer."},
+                status=400,
+            )
+        return recent, None
+
+    # ------------------------------------------------------------------
+    # GET /api/v1/draws/consecutive_tail/?game={code}&recent={N}
+    # ------------------------------------------------------------------
+
+    @action(detail=False, methods=['get'], url_path='consecutive_tail')
+    def consecutive_tail(self, request):
+        """連號/同尾分析。"""
+        game_code = request.query_params.get('game')
+        game, err = self._get_game_or_error(game_code)
+        if err:
+            return err
+
+        recent, err = self._parse_recent(request)
+        if err:
+            return err
+
+        draws = list(
+            DrawResult.objects
+            .filter(game=game)
+            .order_by('-draw_date', '-draw_term')[:recent]
+        )
+
+        # 連號統計
+        consecutive_counter: dict[int, int] = defaultdict(int)
+        # 同尾統計
+        tail_counter: dict[int, int] = defaultdict(int)
+
+        for draw in draws:
+            nums = sorted(draw.numbers_sorted)
+
+            # 計算連號對數
+            pairs = 0
+            for i in range(len(nums) - 1):
+                if nums[i + 1] - nums[i] == 1:
+                    pairs += 1
+            consecutive_counter[pairs] += 1
+
+            # 計算尾數頻率
+            for num in nums:
+                tail_counter[num % 10] += 1
+
+        # 格式化連號結果
+        consecutive = {}
+        for pairs_count, draw_count in sorted(consecutive_counter.items()):
+            key = f"{pairs_count}對"
+            consecutive[key] = draw_count
+
+        # 格式化同尾結果
+        tail_frequency = [
+            {"tail": t, "count": tail_counter.get(t, 0)}
+            for t in range(10)
+        ]
+
+        return Response({
+            "game": game.code,
+            "recent_draws": recent,
+            "consecutive": consecutive,
+            "tail_frequency": tail_frequency,
+        })
+
+    # ------------------------------------------------------------------
+    # GET /api/v1/draws/zone_distribution/?game={code}&recent={N}
+    # ------------------------------------------------------------------
+
+    @action(detail=False, methods=['get'], url_path='zone_distribution')
+    def zone_distribution(self, request):
+        """區間分布圖。"""
+        game_code = request.query_params.get('game')
+        game, err = self._get_game_or_error(game_code)
+        if err:
+            return err
+
+        recent, err = self._parse_recent(request)
+        if err:
+            return err
+
+        draws = list(
+            DrawResult.objects
+            .filter(game=game)
+            .order_by('-draw_date', '-draw_term')[:recent]
+        )
+
+        pool_size = game.main_pool_size
+        # 建立區間
+        zone_counter: dict[str, int] = {}
+        zone_labels = []
+        start = 1
+        while start <= pool_size:
+            end = min(start + 9, pool_size)
+            label = f"{start}-{end}"
+            zone_labels.append((label, start, end))
+            zone_counter[label] = 0
+            start += 10
+
+        for draw in draws:
+            for num in draw.numbers_sorted:
+                for label, lo, hi in zone_labels:
+                    if lo <= num <= hi:
+                        zone_counter[label] += 1
+                        break
+
+        zones = [{"zone": label, "count": zone_counter[label]} for label, _, _ in zone_labels]
+
+        return Response({
+            "game": game.code,
+            "recent_draws": recent,
+            "zones": zones,
+        })
+
+    # ------------------------------------------------------------------
+    # GET /api/v1/draws/odd_even_size/?game={code}&recent={N}
+    # ------------------------------------------------------------------
+
+    @action(detail=False, methods=['get'], url_path='odd_even_size')
+    def odd_even_size(self, request):
+        """奇偶比/大小比走勢。"""
+        game_code = request.query_params.get('game')
+        game, err = self._get_game_or_error(game_code)
+        if err:
+            return err
+
+        recent, err = self._parse_recent(request)
+        if err:
+            return err
+
+        draws = list(
+            DrawResult.objects
+            .filter(game=game)
+            .order_by('-draw_date', '-draw_term')[:recent]
+        )
+
+        threshold = math.ceil(game.main_pool_size / 2)
+
+        data = []
+        for draw in draws:
+            nums = draw.numbers_sorted
+            odd = sum(1 for n in nums if n % 2 == 1)
+            even = len(nums) - odd
+            small = sum(1 for n in nums if n <= threshold)
+            large = len(nums) - small
+            data.append({
+                "draw_term": draw.draw_term,
+                "draw_date": draw.draw_date.isoformat(),
+                "odd": odd,
+                "even": even,
+                "small": small,
+                "large": large,
+            })
+
+        return Response({
+            "game": game.code,
+            "recent_draws": recent,
+            "data": data,
+        })
+
+    # ------------------------------------------------------------------
+    # GET /api/v1/draws/ac_value/?game={code}&recent={N}
+    # ------------------------------------------------------------------
+
+    @action(detail=False, methods=['get'], url_path='ac_value')
+    def ac_value(self, request):
+        """AC 值分析。"""
+        game_code = request.query_params.get('game')
+        game, err = self._get_game_or_error(game_code)
+        if err:
+            return err
+
+        recent, err = self._parse_recent(request)
+        if err:
+            return err
+
+        draws = list(
+            DrawResult.objects
+            .filter(game=game)
+            .order_by('-draw_date', '-draw_term')[:recent]
+        )
+
+        data = []
+        ac_values = []
+        for draw in draws:
+            nums = sorted(draw.numbers_sorted)
+            # 計算所有兩兩差值的不重複個數
+            diffs = set()
+            for a, b in combinations(nums, 2):
+                diffs.add(abs(b - a))
+            ac = len(diffs) - (len(nums) - 1)
+            ac_values.append(ac)
+            data.append({
+                "draw_term": draw.draw_term,
+                "draw_date": draw.draw_date.isoformat(),
+                "ac_value": ac,
+                "numbers": nums,
+            })
+
+        if ac_values:
+            summary = {
+                "avg": round(sum(ac_values) / len(ac_values), 1),
+                "max": max(ac_values),
+                "min": min(ac_values),
+            }
+        else:
+            summary = {"avg": 0, "max": 0, "min": 0}
+
+        return Response({
+            "game": game.code,
+            "recent_draws": recent,
+            "summary": summary,
+            "data": data,
+        })
+
+    # ------------------------------------------------------------------
+    # GET /api/v1/draws/pair_frequency/?game={code}&recent={N}&top={M}
+    # ------------------------------------------------------------------
+
+    @action(detail=False, methods=['get'], url_path='pair_frequency')
+    def pair_frequency(self, request):
+        """號碼組合頻率。"""
+        game_code = request.query_params.get('game')
+        game, err = self._get_game_or_error(game_code)
+        if err:
+            return err
+
+        recent, err = self._parse_recent(request)
+        if err:
+            return err
+
+        try:
+            top = int(request.query_params.get('top', 20))
+            if top <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return Response(
+                {"error": "'top' must be a positive integer."},
+                status=400,
+            )
+
+        draws = list(
+            DrawResult.objects
+            .filter(game=game)
+            .order_by('-draw_date', '-draw_term')[:recent]
+        )
+
+        pair_counter: dict[tuple[int, int], int] = defaultdict(int)
+        for draw in draws:
+            nums = sorted(draw.numbers_sorted)
+            for a, b in combinations(nums, 2):
+                pair_counter[(a, b)] += 1
+
+        # 按次數排序取前 M 名
+        sorted_pairs = sorted(pair_counter.items(), key=lambda x: x[1], reverse=True)[:top]
+
+        top_pairs = [
+            {"pair": list(pair), "count": count}
+            for pair, count in sorted_pairs
+        ]
+
+        return Response({
+            "game": game.code,
+            "recent_draws": recent,
+            "top_pairs": top_pairs,
         })
