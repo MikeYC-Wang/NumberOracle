@@ -90,7 +90,7 @@ onMounted(async () => {
       <div class="hero">
         <img src="/NumberOracle_LOGO.svg" alt="NumberOracle Logo" class="hero__logo" />
         <h1 class="hero__title">NumberOracle</h1>
-        <p class="hero__tagline">純歷史數據統計與機率運算的彩券分析平台</p>
+        <p class="hero__tagline">歷史數據統計與機率運算的彩券分析平台</p>
       </div>
 
       <h2 class="section-title">
