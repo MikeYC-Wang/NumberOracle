@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useAuthStore } from '../../stores/authStore'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8001/api/v1'
+
+const authStore = useAuthStore()
 
 const mobileMenuOpen = ref(false)
 const refreshing = ref(false)
@@ -44,6 +47,11 @@ async function handleRefresh() {
     }, 2000)
   }
 }
+
+async function handleLogout() {
+  await authStore.logout()
+  mobileMenuOpen.value = false
+}
 </script>
 
 <template>
@@ -83,6 +91,28 @@ async function handleRefresh() {
             <i class="fas fa-magic"></i> 預測搖獎
           </router-link>
         </li>
+        <li>
+          <router-link to="/check" @click="mobileMenuOpen = false">
+            <i class="fas fa-check-double"></i> 對獎
+          </router-link>
+        </li>
+
+        <!-- Auth -->
+        <li v-if="!authStore.isLoggedIn">
+          <router-link to="/login" @click="mobileMenuOpen = false">
+            <i class="fas fa-sign-in-alt"></i> 登入
+          </router-link>
+        </li>
+        <li v-if="authStore.isLoggedIn" class="navbar__user-wrapper">
+          <span class="navbar__username">
+            <i class="fas fa-user-circle"></i>
+            {{ authStore.user?.username ?? '使用者' }}
+          </span>
+          <button class="navbar__logout-btn" @click="handleLogout">
+            <i class="fas fa-sign-out-alt"></i> 登出
+          </button>
+        </li>
+
         <li class="navbar__refresh-wrapper">
           <button
             class="navbar__refresh-btn"
@@ -157,6 +187,7 @@ async function handleRefresh() {
 .navbar__links {
   display: flex;
   gap: var(--spacing-xs);
+  align-items: center;
 }
 
 .navbar__links a {
@@ -175,6 +206,44 @@ async function handleRefresh() {
 .navbar__links a.router-link-active {
   background-color: var(--color-primary-dark);
   color: var(--color-surface);
+}
+
+/* User auth area */
+.navbar__user-wrapper {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.navbar__username {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-sm) var(--spacing-md);
+  color: var(--color-text);
+  font-weight: 600;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.navbar__logout-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  border: none;
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 0.875rem;
+  font-family: inherit;
+  background-color: rgba(255, 255, 255, 0.15);
+  color: var(--color-text);
+  transition: background-color 0.2s ease;
+}
+
+.navbar__logout-btn:hover {
+  background-color: rgba(255, 255, 255, 0.25);
 }
 
 .navbar__refresh-wrapper {
@@ -237,6 +306,20 @@ async function handleRefresh() {
 
   .navbar__links a {
     padding: var(--spacing-md);
+  }
+
+  .navbar__user-wrapper {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .navbar__username {
+    padding: var(--spacing-md);
+  }
+
+  .navbar__logout-btn {
+    padding: var(--spacing-md);
+    justify-content: flex-start;
   }
 }
 </style>

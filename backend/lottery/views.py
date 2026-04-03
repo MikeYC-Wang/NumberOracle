@@ -629,3 +629,133 @@ class DrawResultViewSet(viewsets.ReadOnlyModelViewSet):
             "recent_draws": recent,
             "top_pairs": top_pairs,
         })
+
+    # ------------------------------------------------------------------
+    # POST /api/v1/draws/check_numbers/
+    # ------------------------------------------------------------------
+
+    @action(detail=False, methods=['post'], url_path='check_numbers')
+    def check_numbers(self, request):
+        """對獎：比對使用者選號與開獎號碼。"""
+        game_code = request.data.get('game')
+        game, err = self._get_game_or_error(game_code)
+        if err:
+            return err
+
+        draw_term = request.data.get('draw_term')
+        user_numbers = request.data.get('numbers')
+        user_special = request.data.get('special_number')
+
+        # 驗證 numbers
+        if not user_numbers or not isinstance(user_numbers, list):
+            return Response(
+                {"error": "'numbers' is required and must be a list of integers."},
+                status=400,
+            )
+        try:
+            user_numbers = [int(n) for n in user_numbers]
+        except (TypeError, ValueError):
+            return Response(
+                {"error": "'numbers' must be a list of integers."},
+                status=400,
+            )
+
+        # 查詢開獎紀錄
+        if draw_term:
+            draw = (
+                DrawResult.objects
+                .filter(game=game, draw_term=draw_term)
+                .first()
+            )
+            if not draw:
+                return Response(
+                    {"error": f"找不到 {game_code} 第 {draw_term} 期的開獎紀錄。"},
+                    status=404,
+                )
+        else:
+            draw = (
+                DrawResult.objects
+                .filter(game=game)
+                .order_by('-draw_date', '-draw_term')
+                .first()
+            )
+            if not draw:
+                return Response(
+                    {"error": f"{game_code} 尚無任何開獎紀錄。"},
+                    status=404,
+                )
+
+        # 計算交集
+        winning_set = set(draw.numbers_sorted)
+        user_set = set(user_numbers)
+        matched = sorted(winning_set & user_set)
+        matched_count = len(matched)
+
+        # 特別號比對
+        special_matched = False
+        if game.has_special and user_special is not None and draw.special_number is not None:
+            try:
+                special_matched = int(user_special) == draw.special_number
+            except (TypeError, ValueError):
+                pass
+
+        # 結果描述
+        if matched_count == 0:
+            result_description = "未中獎"
+        else:
+            result_description = f"中{matched_count}個號碼"
+        if special_matched:
+            result_description += " + 特別號"
+
+        return Response({
+            "game": game.code,
+            "draw_term": draw.draw_term,
+            "draw_date": draw.draw_date.isoformat(),
+            "winning_numbers": draw.numbers_sorted,
+            "winning_special": draw.special_number,
+            "your_numbers": user_numbers,
+            "your_special": user_special,
+            "matched_numbers": matched,
+            "matched_count": matched_count,
+            "special_matched": special_matched,
+            "result_description": result_description,
+        })
+
+    # ------------------------------------------------------------------
+    # GET /api/v1/draws/road_map/?game={code}&recent={N}
+    # ------------------------------------------------------------------
+
+    @action(detail=False, methods=['get'], url_path='road_map')
+    def road_map(self, request):
+        """號碼走勢路珠圖：回傳近 N 期每期開獎號碼，供前端繪製矩陣。"""
+        game_code = request.query_params.get('game')
+        game, err = self._get_game_or_error(game_code)
+        if err:
+            return err
+
+        recent, err = self._parse_recent(request, default=30)
+        if err:
+            return err
+
+        draws = list(
+            DrawResult.objects
+            .filter(game=game)
+            .order_by('-draw_date', '-draw_term')[:recent]
+        )
+
+        draws_data = [
+            {
+                "draw_term": draw.draw_term,
+                "draw_date": draw.draw_date.isoformat(),
+                "numbers_sorted": draw.numbers_sorted,
+                "special_number": draw.special_number,
+            }
+            for draw in draws
+        ]
+
+        return Response({
+            "game": game.code,
+            "pool_size": game.main_pool_size,
+            "recent_draws": recent,
+            "draws": draws_data,
+        })

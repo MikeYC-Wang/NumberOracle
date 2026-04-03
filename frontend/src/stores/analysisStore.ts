@@ -28,6 +28,9 @@ export const useAnalysisStore = defineStore('analysis', () => {
   const acValue = ref<any>(null)
   const pairFrequency = ref<any>(null)
 
+  // 路珠圖
+  const roadMapData = ref<any>(null)
+
   async function fetchDraws(gameCode: string) {
     loading.value = true
     error.value = null
@@ -158,6 +161,20 @@ export const useAnalysisStore = defineStore('analysis', () => {
     }
   }
 
+  async function fetchRoadMap(gameCode: string, recent?: number) {
+    try {
+      const params = new URLSearchParams({ game: gameCode })
+      if (recent !== undefined) {
+        params.set('recent', String(recent))
+      }
+      const res = await fetch(`${API_BASE}/draws/road_map/?${params}`)
+      if (!res.ok) throw new Error(`API 錯誤: ${res.status}`)
+      roadMapData.value = await res.json()
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : '載入失敗'
+    }
+  }
+
   function clearDraws() {
     draws.value = []
     totalCount.value = 0
@@ -170,6 +187,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
     oddEvenSize.value = null
     acValue.value = null
     pairFrequency.value = null
+    roadMapData.value = null
   }
 
   return {
@@ -187,6 +205,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
     oddEvenSize,
     acValue,
     pairFrequency,
+    roadMapData,
     fetchDraws,
     fetchHotCold,
     fetchMissingValues,
@@ -196,6 +215,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
     fetchOddEvenSize,
     fetchAcValue,
     fetchPairFrequency,
+    fetchRoadMap,
     clearDraws,
   }
 })

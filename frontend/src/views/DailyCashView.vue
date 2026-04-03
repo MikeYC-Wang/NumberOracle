@@ -13,6 +13,7 @@ import OddEvenSizeChart from '../components/charts/OddEvenSizeChart.vue'
 import AcValueChart from '../components/charts/AcValueChart.vue'
 import PairFrequencyChart from '../components/charts/PairFrequencyChart.vue'
 import DataTable from '../components/common/DataTable.vue'
+import RoadMapChart from '../components/charts/RoadMapChart.vue'
 
 const GAME_CODE = 'daily_cash'
 const POOL_SIZE = 39
@@ -53,6 +54,7 @@ async function fetchAdvanced() {
     analysisStore.fetchOddEvenSize(GAME_CODE, recent),
     analysisStore.fetchAcValue(GAME_CODE, recent),
     analysisStore.fetchPairFrequency(GAME_CODE, recent),
+    analysisStore.fetchRoadMap(GAME_CODE, recent),
   ])
 }
 
@@ -176,6 +178,20 @@ onMounted(async () => {
             <p class="chart-note"><i class="fas fa-info-circle"></i> 近 {{ analysisStore.selectedRecent }} 期中最常同時出現的兩個號碼組合 (前 20 名)</p>
           </section>
         </div>
+
+        <!-- 號碼走勢路珠圖 -->
+        <section
+          v-if="analysisStore.roadMapData?.draws"
+          class="card full-width-section"
+        >
+          <h2><i class="fas fa-th"></i> 號碼走勢路珠圖</h2>
+          <RoadMapChart
+            :draws="analysisStore.roadMapData.draws"
+            :pool-size="POOL_SIZE"
+            :show-special="false"
+          />
+          <p class="chart-note"><i class="fas fa-info-circle"></i> 矩陣圖：Y 軸為號碼，X 軸為期數，圓點代表該號碼在該期有開出；可橫向捲動查看更多期</p>
+        </section>
 
         <!-- 號碼追蹤 -->
         <section class="card full-width-section trend-section">

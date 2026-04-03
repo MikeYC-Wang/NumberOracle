@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { useAuthStore } from '../stores/authStore'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -33,12 +34,37 @@ const router = createRouter({
       component: () => import('../views/PredictionView.vue'),
       meta: { title: '預測搖獎區' },
     },
+    {
+      path: '/check',
+      name: 'check',
+      component: () => import('../views/CheckNumbersView.vue'),
+      meta: { title: '對獎' },
+    },
+    {
+      path: '/login',
+      name: 'login',
+      component: () => import('../views/LoginView.vue'),
+      meta: { title: '登入' },
+    },
+    {
+      path: '/register',
+      name: 'register',
+      component: () => import('../views/RegisterView.vue'),
+      meta: { title: '註冊' },
+    },
   ],
 })
 
 router.beforeEach((to) => {
   const title = to.meta.title as string
   document.title = title ? `${title} | NumberOracle` : 'NumberOracle'
+
+  if (to.meta.requiresAuth) {
+    const authStore = useAuthStore()
+    if (!authStore.isLoggedIn) {
+      return { path: '/login', query: { redirect: to.fullPath } }
+    }
+  }
 })
 
 export default router
