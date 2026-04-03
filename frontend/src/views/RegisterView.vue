@@ -13,21 +13,61 @@ const passwordConfirm = ref('')
 const errorMsg = ref('')
 const loading = ref(false)
 
+const usernameError = computed(() => {
+  if (!username.value) return ''
+  if (!/^[a-zA-Z0-9_]+$/.test(username.value)) return '只能包含英文字母、數字和底線'
+  if (username.value.length < 3) return '至少 3 個字元'
+  return ''
+})
+
+const passwordStrength = computed(() => {
+  const p = password.value
+  if (!p) return { level: 0, text: '', color: '' }
+  let score = 0
+  if (p.length >= 8) score++
+  if (/[A-Z]/.test(p)) score++
+  if (/[a-z]/.test(p)) score++
+  if (/[0-9]/.test(p)) score++
+  if (/[!@#$%^&*()_+\-=\[\]{}|;:,.<>?/~`]/.test(p)) score++
+
+  if (score <= 2) return { level: 1, text: '弱', color: 'var(--color-accent)' }
+  if (score <= 3) return { level: 2, text: '中', color: '#E9C46A' }
+  if (score === 4) return { level: 3, text: '強', color: 'var(--color-secondary)' }
+  return { level: 4, text: '極強', color: '#2A9D8F' }
+})
+
+const passwordErrors = computed(() => {
+  const p = password.value
+  if (!p) return []
+  const errs: string[] = []
+  if (p.length < 8) errs.push('至少 8 個字元')
+  if (!/[A-Z]/.test(p)) errs.push('需包含大寫字母')
+  if (!/[a-z]/.test(p)) errs.push('需包含小寫字母')
+  if (!/[0-9]/.test(p)) errs.push('需包含數字')
+  if (!/[!@#$%^&*()_+\-=\[\]{}|;:,.<>?/~`]/.test(p)) errs.push('需包含特殊符號')
+  return errs
+})
+
 const passwordMismatch = computed(() => {
   if (!passwordConfirm.value) return false
   return password.value !== passwordConfirm.value
 })
 
+const canSubmit = computed(() => {
+  return username.value
+    && !usernameError.value
+    && password.value
+    && passwordErrors.value.length === 0
+    && passwordConfirm.value
+    && !passwordMismatch.value
+    && !loading.value
+})
+
 async function handleRegister() {
   errorMsg.value = ''
 
-  if (!username.value || !password.value || !passwordConfirm.value) {
-    errorMsg.value = '請填寫所有必填欄位'
-    return
-  }
-
-  if (passwordMismatch.value) {
-    errorMsg.value = '兩次密碼不一致'
+  if (!canSubmit.value) {
+    errorMsg.value = '請修正上方的欄位錯誤'
     return
   }
 
@@ -65,9 +105,16 @@ async function handleRegister() {
             id="reg-username"
             v-model="username"
             type="text"
-            placeholder="請輸入帳號"
+            placeholder="英文字母、數字、底線"
             autocomplete="username"
+            :class="{ 'input-error': usernameError }"
           />
+          <p v-if="usernameError" class="field-error">
+            <i class="fas fa-exclamation-triangle"></i> {{ usernameError }}
+          </p>
+          <p v-else-if="username" class="field-hint">
+            <i class="fas fa-check-circle"></i> 帳號格式正確
+          </p>
         </div>
 
         <div class="form-group">
@@ -91,9 +138,26 @@ async function handleRegister() {
             id="reg-password"
             v-model="password"
             type="password"
-            placeholder="請輸入密碼"
+            placeholder="至少 8 字元，含大小寫+數字+特殊符號"
             autocomplete="new-password"
+            :class="{ 'input-error': password && passwordErrors.length > 0 }"
           />
+          <div v-if="password" class="password-feedback">
+            <div class="strength-bar">
+              <div
+                class="strength-bar__fill"
+                :style="{ width: (passwordStrength.level / 4 * 100) + '%', background: passwordStrength.color }"
+              ></div>
+            </div>
+            <span class="strength-label" :style="{ color: passwordStrength.color }">
+              {{ passwordStrength.text }}
+            </span>
+          </div>
+          <ul v-if="password && passwordErrors.length > 0" class="password-rules">
+            <li v-for="err in passwordErrors" :key="err" class="rule-fail">
+              <i class="fas fa-times-circle"></i> {{ err }}
+            </li>
+          </ul>
         </div>
 
         <div class="form-group">
@@ -121,7 +185,7 @@ async function handleRegister() {
         <button
           class="auth-btn"
           type="submit"
-          :disabled="loading || passwordMismatch"
+          :disabled="!canSubmit"
         >
           <i :class="loading ? 'fas fa-spinner fa-spin' : 'fas fa-user-plus'"></i>
           {{ loading ? '註冊中...' : '註冊' }}
@@ -155,7 +219,10 @@ async function handleRegister() {
 }
 
 .auth-title {
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm);
   margin-bottom: var(--spacing-xl);
   font-size: 1.5rem;
   color: var(--color-text);
@@ -163,7 +230,6 @@ async function handleRegister() {
 
 .auth-title i {
   color: var(--color-primary);
-  margin-right: var(--spacing-sm);
 }
 
 .auth-form {
@@ -221,6 +287,60 @@ async function handleRegister() {
 
 .field-error i {
   margin-right: var(--spacing-xs);
+}
+
+.field-hint {
+  color: var(--color-secondary);
+  font-size: 0.8rem;
+}
+.field-hint i {
+  margin-right: var(--spacing-xs);
+}
+
+.password-feedback {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.strength-bar {
+  flex: 1;
+  height: 6px;
+  background: var(--color-border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.strength-bar__fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease, background 0.3s ease;
+}
+
+.strength-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  min-width: 36px;
+}
+
+.password-rules {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs) var(--spacing-md);
+}
+
+.password-rules li {
+  font-size: 0.75rem;
+}
+
+.rule-fail {
+  color: var(--color-accent);
+}
+.rule-fail i {
+  margin-right: 2px;
 }
 
 .auth-error {

@@ -138,6 +138,8 @@ function hideTooltip() {
   border-collapse: collapse;
   font-size: 0.75rem;
   font-family: var(--font-mono);
+  width: 100%;
+  min-width: 800px;
 }
 
 .road-map__corner {
@@ -177,12 +179,13 @@ function hideTooltip() {
   left: 0;
   z-index: 1;
   background: var(--color-surface);
-  padding: 2px 8px;
+  padding: 3px 10px;
   text-align: center;
   font-weight: 700;
   color: var(--color-text);
-  border-right: 1px solid var(--color-border);
-  min-width: 40px;
+  border-right: 2px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  min-width: 44px;
 }
 
 .road-map__row--hover .road-map__number-label {
@@ -190,18 +193,19 @@ function hideTooltip() {
 }
 
 .road-map__cell {
-  padding: 2px;
+  padding: 3px;
   text-align: center;
   vertical-align: middle;
-  min-width: 28px;
-  height: 22px;
-  border-bottom: 1px solid rgba(223, 230, 233, 0.4);
+  min-width: 32px;
+  height: 26px;
+  border-bottom: 1px solid var(--color-border);
+  border-right: 1px solid rgba(223, 230, 233, 0.3);
 }
 
 .road-map__dot {
   display: inline-block;
-  width: 10px;
-  height: 10px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   cursor: pointer;
   transition: transform 0.15s;

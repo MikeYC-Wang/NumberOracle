@@ -1,16 +1,33 @@
+import re
+
 from django.contrib.auth.models import User
 from rest_framework import serializers
 
 
 class RegisterSerializer(serializers.Serializer):
-    username = serializers.CharField(max_length=150)
+    username = serializers.CharField(max_length=150, min_length=3)
     password = serializers.CharField(write_only=True, min_length=8)
     password_confirm = serializers.CharField(write_only=True, min_length=8)
     email = serializers.EmailField(required=False, allow_blank=True)
 
     def validate_username(self, value):
+        if not re.match(r'^[a-zA-Z0-9_]+$', value):
+            raise serializers.ValidationError(
+                "使用者名稱只能包含英文字母、數字和底線。"
+            )
         if User.objects.filter(username=value).exists():
             raise serializers.ValidationError("此使用者名稱已被使用。")
+        return value
+
+    def validate_password(self, value):
+        if not re.search(r'[A-Z]', value):
+            raise serializers.ValidationError("密碼需包含至少一個大寫字母。")
+        if not re.search(r'[a-z]', value):
+            raise serializers.ValidationError("密碼需包含至少一個小寫字母。")
+        if not re.search(r'[0-9]', value):
+            raise serializers.ValidationError("密碼需包含至少一個數字。")
+        if not re.search(r'[!@#$%^&*()_+\-=\[\]{}|;:,.<>?/~`]', value):
+            raise serializers.ValidationError("密碼需包含至少一個特殊符號。")
         return value
 
     def validate(self, data):

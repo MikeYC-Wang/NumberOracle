@@ -1,5 +1,4 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { useAuthStore } from '../stores/authStore'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -55,11 +54,12 @@ const router = createRouter({
   ],
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const title = to.meta.title as string
   document.title = title ? `${title} | NumberOracle` : 'NumberOracle'
 
   if (to.meta.requiresAuth) {
+    const { useAuthStore } = await import('../stores/authStore')
     const authStore = useAuthStore()
     if (!authStore.isLoggedIn) {
       return { path: '/login', query: { redirect: to.fullPath } }

@@ -87,13 +87,13 @@ function toggleSpecialNumber(num: number) {
 interface CheckResult {
   draw_term: string
   draw_date: string
-  draw_numbers: number[]
-  special_number: number | null
+  winning_numbers: number[]
+  winning_special: number | null
   your_numbers: number[]
   your_special: number | null
   matched_numbers: number[]
-  matched_special: boolean
-  match_count: number
+  special_matched: boolean
+  matched_count: number
   result_description: string
 }
 
@@ -291,17 +291,17 @@ onMounted(async () => {
             <h3>開獎號碼</h3>
             <div class="result-balls">
               <LotteryBall
-                v-for="num in result.draw_numbers"
+                v-for="num in result.winning_numbers"
                 :key="'draw-' + num"
                 :number="num"
                 :type="result.matched_numbers.includes(num) ? 'hot' : 'normal'"
                 size="lg"
               />
-              <template v-if="result.special_number !== null">
+              <template v-if="result.winning_special !== null">
                 <span class="plus-sign">+</span>
                 <LotteryBall
-                  :number="result.special_number"
-                  :type="result.matched_special ? 'special' : 'normal'"
+                  :number="result.winning_special"
+                  :type="result.special_matched ? 'special' : 'normal'"
                   size="lg"
                 />
               </template>
@@ -323,7 +323,7 @@ onMounted(async () => {
                 <span class="plus-sign">+</span>
                 <LotteryBall
                   :number="result.your_special"
-                  :type="result.matched_special ? 'special' : 'normal'"
+                  :type="result.special_matched ? 'special' : 'normal'"
                   size="md"
                 />
               </template>
@@ -333,8 +333,8 @@ onMounted(async () => {
           <!-- Match summary -->
           <div class="result-summary">
             <div class="match-count">
-              中 {{ result.match_count }} 個號碼
-              <span v-if="result.matched_special" class="match-special">
+              中 {{ result.matched_count }} 個號碼
+              <span v-if="result.special_matched" class="match-special">
                 + 特別號
               </span>
             </div>

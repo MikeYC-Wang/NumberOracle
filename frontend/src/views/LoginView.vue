@@ -108,7 +108,10 @@ async function handleLogin() {
 }
 
 .auth-title {
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm);
   margin-bottom: var(--spacing-xl);
   font-size: 1.5rem;
   color: var(--color-text);
@@ -116,7 +119,6 @@ async function handleLogin() {
 
 .auth-title i {
   color: var(--color-primary);
-  margin-right: var(--spacing-sm);
 }
 
 .auth-form {
