@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import * as echarts from 'echarts'
-import type { NumberFrequency } from '@/types/lottery'
-import { getHotColdBarOptions } from '@/composables/useChartOptions'
+import type { NumberFrequency } from '../../types/lottery'
+import { getHotColdBarOptions } from '../../composables/useChartOptions'
 
 interface Props {
   frequencies: NumberFrequency[]
@@ -45,12 +45,19 @@ watch(() => [props.frequencies, props.poolSize], updateChart, { deep: true })
 </script>
 
 <template>
-  <div ref="chartRef" class="hot-cold-chart" />
+  <div class="chart-scroll-wrapper">
+    <div ref="chartRef" class="hot-cold-chart" />
+  </div>
 </template>
 
 <style scoped>
+.chart-scroll-wrapper {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .hot-cold-chart {
-  width: 100%;
+  min-width: 600px;
   min-height: 320px;
   height: 100%;
 }

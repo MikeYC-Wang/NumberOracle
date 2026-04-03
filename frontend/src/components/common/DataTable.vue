@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import type { DrawResult } from '@/types/lottery'
+import type { DrawResult } from '../../types/lottery'
 import LotteryBall from './LotteryBall.vue'
 
 interface Props {
@@ -30,19 +30,24 @@ function goTo(page: number) {
   }
 }
 
-/** 產生可視分頁按鈕清單 */
+/** 滑動視窗分頁：固定顯示 3 個頁碼 */
 const visiblePages = computed(() => {
   const total = totalPages.value
   const current = currentPage.value
-  const pages: number[] = []
 
-  const start = Math.max(1, current - 2)
-  const end = Math.min(total, current + 2)
-
-  for (let i = start; i <= end; i++) {
-    pages.push(i)
+  if (total <= 3) {
+    return Array.from({ length: total }, (_, i) => i + 1)
   }
-  return pages
+
+  let start = current
+  if (start + 2 > total) {
+    start = total - 2
+  }
+  if (start < 1) {
+    start = 1
+  }
+
+  return [start, start + 1, start + 2]
 })
 </script>
 
@@ -134,9 +139,17 @@ const visiblePages = computed(() => {
   color: var(--color-text-secondary);
   font-weight: 600;
   text-align: left;
-  padding: var(--spacing-sm) var(--spacing-md);
+  padding: var(--spacing-md) var(--spacing-md);
   border-bottom: 2px solid var(--color-border);
   white-space: nowrap;
+}
+
+.data-table thead {
+  margin-top: var(--spacing-md);
+}
+
+.data-table-wrapper h2 + & {
+  margin-top: var(--spacing-md);
 }
 
 .data-table td {

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import * as echarts from 'echarts'
-import type { MissingValue } from '@/types/lottery'
-import { getMissingValueOptions } from '@/composables/useChartOptions'
+import type { MissingValue } from '../../types/lottery'
+import { getMissingValueOptions } from '../../composables/useChartOptions'
 
 interface Props {
   missingValues: MissingValue[]
@@ -44,12 +44,19 @@ watch(() => props.missingValues, updateChart, { deep: true })
 </script>
 
 <template>
-  <div ref="chartRef" class="missing-value-chart" />
+  <div class="chart-scroll-wrapper">
+    <div ref="chartRef" class="missing-value-chart" />
+  </div>
 </template>
 
 <style scoped>
+.chart-scroll-wrapper {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .missing-value-chart {
-  width: 100%;
+  min-width: 600px;
   min-height: 320px;
   height: 100%;
 }

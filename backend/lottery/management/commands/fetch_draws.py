@@ -17,24 +17,32 @@ from lottery.models import DrawResult, LotteryGame
 
 logger = logging.getLogger(__name__)
 
+# 台彩 API 基礎路徑
+BASE_URL = "https://api.taiwanlottery.com/TLCAPIWeB/Lottery"
+
 # 彩券遊戲代碼 → API 對應設定
 GAME_CONFIG = {
     "daily_cash": {
-        "api_url": "https://api.taiwanlottery.com/TLCAPIWeB/Lottery/DailyCash",
-        "game_name": "DailyCash",
+        "api_path": "Daily539Result",
+        "result_key": "daily539Res",
+        "main_count": 5,       # 主區開出幾球
+        "has_special": False,
     },
     "lotto649": {
-        "api_url": "https://api.taiwanlottery.com/TLCAPIWeB/Lottery/Lotto649",
-        "game_name": "Lotto649",
+        "api_path": "Lotto649Result",
+        "result_key": "lotto649Res",
+        "main_count": 6,       # 主區開出 6 球，drawNumberSize 第 7 個是特別號
+        "has_special": True,
     },
     "super_lotto": {
-        "api_url": "https://api.taiwanlottery.com/TLCAPIWeB/Lottery/SuperLotto638",
-        "game_name": "SuperLotto638",
+        "api_path": "SuperLotto638Result",
+        "result_key": "superLotto638Res",
+        "main_count": 6,       # 主區開出 6 球，drawNumberSize 第 7 個是第二區
+        "has_special": True,
     },
 }
 
 REQUEST_HEADERS = {
-    "Content-Type": "application/json",
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -116,82 +124,90 @@ class Command(BaseCommand):
         )
 
     def _fetch_year(self, game, config, year):
-        """抓取某遊戲某年度的開獎資料，回傳 (created_count, updated_count)"""
+        """抓取某遊戲某年度的所有月份開獎資料，回傳 (created_count, updated_count)"""
         self.stdout.write(f"  抓取 {year} 年資料...")
         logger.info("Fetching %s for year %d", game.code, year)
 
-        payload = {
-            "GameName": config["game_name"],
-            "StartYear": str(year),
-            "EndYear": str(year),
-            "StartMonth": "01",
-            "EndMonth": "12",
-            "StartShowOrder": "",
-            "EndShowOrder": "",
-        }
+        created_total = 0
+        updated_total = 0
 
-        data = self._request_with_retry(config["api_url"], payload)
-        if data is None:
-            self.stderr.write(
-                self.style.ERROR(f"  {year} 年資料抓取失敗，跳過")
-            )
-            return 0, 0
+        for month in range(1, 13):
+            # 跳過尚未到來的月份
+            today = date.today()
+            if year > today.year or (year == today.year and month > today.month):
+                break
 
-        # 解析回傳結構
-        lottery_datas = (
-            data.get("content", {}).get("lotteryDatas") or []
-        )
-        if not lottery_datas:
-            self.stdout.write(
-                self.style.WARNING(f"  {year} 年無開獎資料")
-            )
-            return 0, 0
+            month_str = f"{year}-{month:02d}"
+            url = f"{BASE_URL}/{config['api_path']}"
+            params = {
+                "period": "",
+                "month": month_str,
+                "pageSize": "50",
+            }
 
-        created_count = 0
-        updated_count = 0
-
-        for item in lottery_datas:
-            try:
-                created = self._save_draw(game, item)
-                if created:
-                    created_count += 1
-                else:
-                    updated_count += 1
-            except Exception as e:
-                logger.exception(
-                    "Error saving draw term=%s for %s: %s",
-                    item.get("period", "?"),
-                    game.code,
-                    e,
-                )
+            data = self._request_with_retry(url, params)
+            if data is None:
                 self.stderr.write(
-                    self.style.ERROR(
-                        f"  儲存第 {item.get('period', '?')} 期失敗: {e}"
-                    )
+                    self.style.ERROR(f"    {month_str} 資料抓取失敗，跳過")
                 )
+                continue
+
+            # 解析回傳結構
+            content = data.get("content") or {}
+            lottery_items = content.get(config["result_key"]) or []
+
+            if not lottery_items:
+                logger.debug("No data for %s %s", game.code, month_str)
+                continue
+
+            created_count = 0
+            updated_count = 0
+
+            for item in lottery_items:
+                try:
+                    created = self._save_draw(game, config, item)
+                    if created:
+                        created_count += 1
+                    else:
+                        updated_count += 1
+                except Exception as e:
+                    logger.exception(
+                        "Error saving draw term=%s for %s: %s",
+                        item.get("period", "?"),
+                        game.code,
+                        e,
+                    )
+                    self.stderr.write(
+                        self.style.ERROR(
+                            f"    儲存第 {item.get('period', '?')} 期失敗: {e}"
+                        )
+                    )
+
+            created_total += created_count
+            updated_total += updated_count
 
         self.stdout.write(
             self.style.SUCCESS(
-                f"  {year} 年: 新增 {created_count} 筆, 更新 {updated_count} 筆"
+                f"  {year} 年: 新增 {created_total} 筆, 更新 {updated_total} 筆"
             )
         )
-        return created_count, updated_count
+        return created_total, updated_total
 
-    def _request_with_retry(self, url, payload):
-        """帶重試邏輯的 POST 請求，回傳 JSON dict 或 None"""
+    def _request_with_retry(self, url, params):
+        """帶重試邏輯的 GET 請求，回傳 JSON dict 或 None"""
         for attempt in range(1, MAX_RETRIES + 1):
             try:
-                # 請求間隔 1~2 秒
+                # 請求間隔 0.5~1.5 秒 (避免被封鎖)
                 if attempt > 1:
                     backoff = RETRY_BACKOFF_BASE ** attempt + random.uniform(0, 1)
                     logger.info("Retry #%d after %.1fs", attempt, backoff)
                     time.sleep(backoff)
                 else:
-                    time.sleep(random.uniform(1.0, 2.0))
+                    time.sleep(random.uniform(0.3, 0.8))
 
-                response = requests.post(
+                response = requests.get(
                     url,
-                    json=payload,
+                    params=params,
                     headers=REQUEST_HEADERS,
                     timeout=REQUEST_TIMEOUT,
                 )
@@ -199,12 +215,12 @@ class Command(BaseCommand):
 
                 data = response.json()
 
-                # 台彩 API 可能回傳自定義錯誤碼
-                if data.get("errorCode") and data["errorCode"] != "0":
+                # 台彩 API 錯誤碼檢查
+                if data.get("rtCode") is not None and data["rtCode"] != 0:
                     logger.warning(
-                        "API returned error: %s - %s",
-                        data.get("errorCode"),
-                        data.get("errorMessage", ""),
+                        "API returned error: rtCode=%s, rtMsg=%s",
+                        data.get("rtCode"),
+                        data.get("rtMsg", ""),
                     )
                     continue
 
@@ -234,37 +250,46 @@ class Command(BaseCommand):
         logger.error("All %d attempts failed for %s", MAX_RETRIES, url)
         return None
 
-    def _save_draw(self, game, item):
+    def _save_draw(self, game, config, item):
         """
         解析單筆開獎資料並 update_or_create 到資料庫。
         回傳 True 表示新增，False 表示更新。
+
+        API 回傳格式:
+        - drawNumberSize: 依大小排序的號碼 (含特別號在最後一個位置)
+        - drawNumberAppear: 依開獎順序的號碼 (含特別號在最後一個位置)
+        - period: 期數
+        - lotteryDate: "2025-01-31T00:00:00"
+        - sellAmount / totalAmount: 銷售額
         """
         draw_term = str(item["period"]).strip()
 
-        # 解析日期 "2024/01/02"
-        draw_date = datetime.strptime(
-            item["lotteryDate"].strip(), "%Y/%m/%d"
-        ).date()
+        # 解析日期 "2025-01-31T00:00:00"
+        date_str = item["lotteryDate"].strip()
+        draw_date = datetime.fromisoformat(date_str).date()
 
-        # 解析號碼 "01,15,23,31,39"
-        raw_numbers_str = item.get("lotteryNo", "")
-        numbers_ordered = [
-            int(n.strip()) for n in raw_numbers_str.split(",") if n.strip()
-        ]
-        numbers_sorted = sorted(numbers_ordered)
+        main_count = config["main_count"]
+        has_special = config["has_special"]
 
-        # 特別號
+        # drawNumberSize = 依大小排序 (含特別號在末位)
+        all_numbers_sorted = item.get("drawNumberSize", [])
+        # drawNumberAppear = 依落球順序 (含特別號在末位)
+        all_numbers_appear = item.get("drawNumberAppear", [])
+
+        # 拆分主區與特別號
+        numbers_sorted = sorted(all_numbers_sorted[:main_count])
+        numbers_ordered = list(all_numbers_appear[:main_count])
+
         special_number = None
-        if game.has_special and item.get("specialNo"):
-            special_raw = str(item["specialNo"]).strip()
-            if special_raw:
-                special_number = int(special_raw)
+        if has_special and len(all_numbers_sorted) > main_count:
+            special_number = all_numbers_sorted[main_count]
 
         # 銷售額
         total_sales = None
-        if item.get("totalAmount") is not None:
+        sell_amount = item.get("sellAmount") or item.get("totalAmount")
+        if sell_amount is not None:
             try:
-                total_sales = int(item["totalAmount"])
+                total_sales = int(sell_amount)
             except (ValueError, TypeError):
                 total_sales = None
 

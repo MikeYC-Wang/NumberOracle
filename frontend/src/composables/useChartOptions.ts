@@ -1,4 +1,4 @@
-import type { NumberFrequency, MissingValue } from '@/types/lottery'
+import type { NumberFrequency, MissingValue } from '../types/lottery'
 import type { EChartsOption } from 'echarts'
 
 /** 統一字型設定 */
@@ -73,7 +73,7 @@ export function getHotColdBarOptions(
     grid: {
       left: 40,
       right: 16,
-      top: 24,
+      top: 48,
       bottom: 40,
       containLabel: true,
     },
@@ -137,7 +137,7 @@ export function getMissingValueOptions(
     grid: {
       left: 40,
       right: 16,
-      top: 24,
+      top: 48,
       bottom: 40,
       containLabel: true,
     },

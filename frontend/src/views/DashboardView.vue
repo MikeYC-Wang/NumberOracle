@@ -1,11 +1,60 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useLotteryStore } from '../stores/lotteryStore'
+import type { DrawResult } from '../types/lottery'
+import LotteryBall from '../components/common/LotteryBall.vue'
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8001/api/v1'
 
 const lotteryStore = useLotteryStore()
 
-onMounted(() => {
-  lotteryStore.fetchGames()
+const latestDraws = ref<Record<string, DrawResult | null>>({})
+const loadingDraws = ref(false)
+
+/** 根據 game code 產生對應路由路徑 */
+function gameRoute(code: string): string {
+  const map: Record<string, string> = {
+    daily_cash: '/daily-cash',
+    lotto649: '/lotto649',
+    super_lotto: '/super-lotto',
+  }
+  return map[code] ?? `/${code}`
+}
+
+/** 根據 game code 取得圖示 */
+function gameIcon(code: string): string {
+  const map: Record<string, string> = {
+    daily_cash: 'fas fa-star',
+    lotto649: 'fas fa-trophy',
+    super_lotto: 'fas fa-bolt',
+  }
+  return map[code] ?? 'fas fa-dice'
+}
+
+async function fetchLatestDraw(gameCode: string) {
+  try {
+    const res = await fetch(`${API_BASE}/draws/?game=${gameCode}&page=1`)
+    if (!res.ok) return null
+    const data = await res.json()
+    const results = data.results ?? data
+    return results.length > 0 ? (results[0] as DrawResult) : null
+  } catch {
+    return null
+  }
+}
+
+onMounted(async () => {
+  await lotteryStore.fetchGames()
+
+  if (lotteryStore.games.length > 0) {
+    loadingDraws.value = true
+    const promises = lotteryStore.games.map(async (game) => {
+      const draw = await fetchLatestDraw(game.code)
+      latestDraws.value[game.code] = draw
+    })
+    await Promise.all(promises)
+    loadingDraws.value = false
+  }
 })
 </script>
 
@@ -22,27 +71,82 @@ onMounted(() => {
         <i class="fas fa-spinner fa-spin"></i> 載入中...
       </div>
 
-      <div v-else class="game-cards">
-        <router-link
-          v-for="game in lotteryStore.games"
-          :key="game.code"
-          :to="`/${game.code.replace('_', '-').replace('lotto649', 'lotto649')}`"
-          class="game-card card"
-        >
-          <div class="game-card__icon">
-            <i class="fas fa-dice"></i>
+      <template v-else>
+        <!-- 遊戲卡片 -->
+        <div class="game-cards">
+          <router-link
+            v-for="game in lotteryStore.games"
+            :key="game.code"
+            :to="gameRoute(game.code)"
+            class="game-card card"
+          >
+            <div class="game-card__icon">
+              <i :class="gameIcon(game.code)"></i>
+            </div>
+            <h2 class="game-card__name">{{ game.name }}</h2>
+            <p class="game-card__info">
+              {{ game.main_pick_count }} 個號碼 / {{ game.main_pool_size }} 選
+              <span v-if="game.has_special"> + 特別號</span>
+            </p>
+            <p class="game-card__schedule">
+              <i class="far fa-calendar-alt"></i>
+              {{ game.draw_schedule }}
+            </p>
+          </router-link>
+        </div>
+
+        <!-- 最新開獎區塊 -->
+        <section class="latest-draws">
+          <h2><i class="fas fa-clock"></i> 最新開獎</h2>
+
+          <div v-if="loadingDraws" class="loading">
+            <i class="fas fa-spinner fa-spin"></i> 載入最新開獎...
           </div>
-          <h2 class="game-card__name">{{ game.name }}</h2>
-          <p class="game-card__info">
-            {{ game.main_pick_count }} 個號碼 / {{ game.main_pool_size }} 選
-            <span v-if="game.has_special"> + 特別號</span>
-          </p>
-          <p class="game-card__schedule">
-            <i class="far fa-calendar-alt"></i>
-            {{ game.draw_schedule }}
-          </p>
-        </router-link>
-      </div>
+
+          <div v-else class="latest-draws__grid">
+            <div
+              v-for="game in lotteryStore.games"
+              :key="game.code"
+              class="latest-draws__item card"
+            >
+              <div class="latest-draws__header">
+                <i :class="gameIcon(game.code)" class="latest-draws__icon"></i>
+                <h3>{{ game.name }}</h3>
+              </div>
+
+              <template v-if="latestDraws[game.code]">
+                <p class="latest-draws__meta">
+                  第 {{ latestDraws[game.code]!.draw_term }} 期
+                  <span class="latest-draws__date">
+                    {{ latestDraws[game.code]!.draw_date }}
+                  </span>
+                </p>
+                <div class="latest-draws__balls">
+                  <LotteryBall
+                    v-for="num in latestDraws[game.code]!.numbers_sorted"
+                    :key="num"
+                    :number="num"
+                    type="normal"
+                    size="md"
+                  />
+                  <template v-if="game.has_special && latestDraws[game.code]!.special_number !== null">
+                    <span class="latest-draws__separator">+</span>
+                    <LotteryBall
+                      :number="latestDraws[game.code]!.special_number!"
+                      type="special"
+                      size="md"
+                    />
+                  </template>
+                </div>
+              </template>
+
+              <p v-else class="latest-draws__empty">
+                <i class="fas fa-inbox"></i> 暫無資料
+              </p>
+            </div>
+          </div>
+        </section>
+      </template>
     </div>
   </div>
 </template>
@@ -69,10 +173,12 @@ h1 i {
   font-size: 1.125rem;
 }
 
+/* 遊戲卡片 */
 .game-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(3, 1fr);
   gap: var(--spacing-lg);
+  margin-bottom: var(--spacing-xl);
 }
 
 .game-card {
@@ -109,5 +215,104 @@ h1 i {
 }
 .game-card__schedule i {
   margin-right: var(--spacing-xs);
+}
+
+/* 最新開獎 */
+.latest-draws {
+  margin-top: var(--spacing-lg);
+}
+
+.latest-draws > h2 {
+  margin-bottom: var(--spacing-lg);
+}
+
+.latest-draws > h2 i {
+  margin-right: var(--spacing-sm);
+  color: var(--color-accent);
+}
+
+.latest-draws__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--spacing-lg);
+}
+
+.latest-draws__item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.latest-draws__header {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.latest-draws__icon {
+  color: var(--color-primary);
+  font-size: 1.125rem;
+}
+
+.latest-draws__header h3 {
+  font-size: 1.125rem;
+}
+
+.latest-draws__meta {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+}
+
+.latest-draws__date {
+  margin-left: var(--spacing-sm);
+  color: var(--color-text-muted);
+}
+
+.latest-draws__balls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-xs);
+  margin-top: var(--spacing-xs);
+}
+
+.latest-draws__separator {
+  font-weight: 700;
+  color: var(--color-text-muted);
+  font-size: 1.25rem;
+  margin: 0 var(--spacing-xs);
+}
+
+.latest-draws__empty {
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  padding: var(--spacing-md) 0;
+}
+
+.latest-draws__empty i {
+  margin-right: var(--spacing-xs);
+}
+
+@media (max-width: 1024px) {
+  .game-cards {
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--spacing-md);
+  }
+
+  .latest-draws__grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--spacing-md);
+  }
+}
+
+@media (max-width: 768px) {
+  .game-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .latest-draws__grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
