@@ -1,10 +1,14 @@
+import csv
 import math
+import random
 import time
 from collections import defaultdict
+from datetime import date
 from itertools import combinations
 
 from django.core.management import call_command
 from django.db.models import Count
+from django.http import HttpResponse
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
@@ -758,4 +762,302 @@ class DrawResultViewSet(viewsets.ReadOnlyModelViewSet):
             "pool_size": game.main_pool_size,
             "recent_draws": recent,
             "draws": draws_data,
+        })
+
+    # ------------------------------------------------------------------
+    # GET /api/v1/draws/export_csv/?game={code}&recent={N}
+    # ------------------------------------------------------------------
+
+    @action(detail=False, methods=['get'], url_path='export_csv')
+    def export_csv(self, request):
+        """匯出開獎紀錄 CSV。"""
+        game_code = request.query_params.get('game')
+        game, err = self._get_game_or_error(game_code)
+        if err:
+            return err
+
+        draws_qs = (
+            DrawResult.objects
+            .filter(game=game)
+            .order_by('-draw_date', '-draw_term')
+        )
+
+        recent_param = request.query_params.get('recent')
+        if recent_param:
+            try:
+                recent = int(recent_param)
+                if recent <= 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                return Response(
+                    {"error": "'recent' must be a positive integer."},
+                    status=400,
+                )
+            draws_qs = draws_qs[:recent]
+
+        draws = list(draws_qs)
+
+        today = date.today().strftime('%Y%m%d')
+        filename = f"{game.code}_draws_{today}.csv"
+
+        response = HttpResponse(content_type='text/csv; charset=utf-8-sig')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+        writer = csv.writer(response)
+
+        # 標頭
+        header = ['期數', '開獎日期']
+        for i in range(1, game.main_pick_count + 1):
+            header.append(f'號碼{i}')
+        if game.has_special:
+            header.append('特別號')
+        writer.writerow(header)
+
+        # 資料
+        for draw in draws:
+            row = [draw.draw_term, draw.draw_date.isoformat()]
+            nums = draw.numbers_sorted
+            for i in range(game.main_pick_count):
+                row.append(nums[i] if i < len(nums) else '')
+            if game.has_special:
+                row.append(draw.special_number if draw.special_number is not None else '')
+            writer.writerow(row)
+
+        return response
+
+    # ------------------------------------------------------------------
+    # GET /api/v1/draws/export_stats_csv/?game={code}&recent={N}
+    # ------------------------------------------------------------------
+
+    @action(detail=False, methods=['get'], url_path='export_stats_csv')
+    def export_stats_csv(self, request):
+        """匯出統計數據 CSV。"""
+        game_code = request.query_params.get('game')
+        game, err = self._get_game_or_error(game_code)
+        if err:
+            return err
+
+        draws_qs = (
+            DrawResult.objects
+            .filter(game=game)
+            .order_by('-draw_date', '-draw_term')
+        )
+
+        recent_param = request.query_params.get('recent')
+        if recent_param:
+            try:
+                recent = int(recent_param)
+                if recent <= 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                return Response(
+                    {"error": "'recent' must be a positive integer."},
+                    status=400,
+                )
+            draws_qs = draws_qs[:recent]
+
+        draws = list(draws_qs)
+        total_draws = len(draws)
+
+        # 統計每個號碼出現次數
+        counter: dict[int, int] = defaultdict(int)
+        for draw in draws:
+            for num in draw.numbers_sorted:
+                counter[num] += 1
+
+        # 計算遺漏值
+        last_seen: dict[int, int] = {}
+        for idx, draw in enumerate(draws):
+            for num in draw.numbers_sorted:
+                if num not in last_seen:
+                    last_seen[num] = idx
+
+        today = date.today().strftime('%Y%m%d')
+        filename = f"{game.code}_stats_{today}.csv"
+
+        response = HttpResponse(content_type='text/csv; charset=utf-8-sig')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+        writer = csv.writer(response)
+        writer.writerow(['號碼', '出現次數', '出現率(%)', '遺漏值'])
+
+        for num in range(1, game.main_pool_size + 1):
+            count = counter.get(num, 0)
+            pct = round(count / total_draws * 100, 2) if total_draws else 0.0
+            missing = last_seen.get(num, total_draws)
+            writer.writerow([num, count, pct, missing])
+
+        return response
+
+    # ------------------------------------------------------------------
+    # POST /api/v1/draws/backtest/
+    # ------------------------------------------------------------------
+
+    @action(detail=False, methods=['post'], url_path='backtest')
+    def backtest(self, request):
+        """回測系統：模擬選號策略並計算命中統計。"""
+        game_code = request.data.get('game')
+        game, err = self._get_game_or_error(game_code)
+        if err:
+            return err
+
+        strategy = request.data.get('strategy', 'random')
+        if strategy not in ('random', 'hot_weighted', 'cold_weighted', 'balanced'):
+            return Response(
+                {"error": "strategy must be one of: random, hot_weighted, cold_weighted, balanced"},
+                status=400,
+            )
+
+        try:
+            recent = int(request.data.get('recent', 100))
+            test_draws_count = int(request.data.get('test_draws', 50))
+            simulations = int(request.data.get('simulations', 100))
+        except (TypeError, ValueError):
+            return Response(
+                {"error": "recent, test_draws, simulations must be positive integers."},
+                status=400,
+            )
+
+        # 上限檢查
+        test_draws_count = min(test_draws_count, 200)
+        simulations = min(simulations, 500)
+
+        # 取所有開獎紀錄 (按日期降序)
+        all_draws = list(
+            DrawResult.objects
+            .filter(game=game)
+            .order_by('-draw_date', '-draw_term')
+        )
+
+        if len(all_draws) < test_draws_count + recent:
+            available_test = max(0, len(all_draws) - recent)
+            if available_test <= 0:
+                return Response(
+                    {"error": f"資料不足。需要至少 {recent + 1} 期資料，目前僅有 {len(all_draws)} 期。"},
+                    status=400,
+                )
+            test_draws_count = available_test
+
+        pool_size = game.main_pool_size
+        pick_count = game.main_pick_count
+
+        def _run_backtest(strat):
+            """Run backtest for a given strategy, return results dict."""
+            match_counts = []
+
+            # 驗證集 = 最近 test_draws_count 期
+            for test_idx in range(test_draws_count):
+                target_draw = all_draws[test_idx]
+                winning_set = set(target_draw.numbers_sorted)
+
+                # 訓練集 = 該期之前 recent 期
+                train_start = test_idx + 1
+                train_end = train_start + recent
+                train_draws = all_draws[train_start:train_end]
+
+                # 計算訓練集頻率
+                freq: dict[int, int] = defaultdict(int)
+                for d in train_draws:
+                    for num in d.numbers_sorted:
+                        freq[num] += 1
+
+                for _ in range(simulations):
+                    picked = _pick_numbers(strat, pool_size, pick_count, freq)
+                    matched = len(set(picked) & winning_set)
+                    match_counts.append(matched)
+
+            # 統計
+            total = len(match_counts)
+            distribution: dict[int, int] = defaultdict(int)
+            for m in match_counts:
+                distribution[m] += 1
+
+            avg_match = round(sum(match_counts) / total, 2) if total else 0
+            max_match = max(match_counts) if match_counts else 0
+            hit_any = sum(1 for m in match_counts if m >= 1)
+            hit_3plus = sum(1 for m in match_counts if m >= 3)
+
+            return {
+                "avg_match": avg_match,
+                "max_match": max_match,
+                "match_distribution": {
+                    str(k): v for k, v in sorted(distribution.items())
+                },
+                "hit_rate_any": round(hit_any / total * 100, 1) if total else 0,
+                "hit_rate_3plus": round(hit_3plus / total * 100, 1) if total else 0,
+            }
+
+        def _pick_numbers(strat, pool, pick, freq):
+            """Generate a set of numbers based on strategy."""
+            numbers = list(range(1, pool + 1))
+
+            if strat == 'random':
+                return sorted(random.sample(numbers, pick))
+
+            elif strat == 'hot_weighted':
+                weights = [1 + freq.get(n, 0) for n in numbers]
+                chosen = _weighted_sample(numbers, weights, pick)
+                return sorted(chosen)
+
+            elif strat == 'cold_weighted':
+                max_count = max(freq.values()) if freq else 0
+                weights = [1 + (max_count - freq.get(n, 0)) for n in numbers]
+                chosen = _weighted_sample(numbers, weights, pick)
+                return sorted(chosen)
+
+            elif strat == 'balanced':
+                # 熱門取 ceil(n/2)，冷門取其餘
+                hot_pick = math.ceil(pick / 2)
+                cold_pick = pick - hot_pick
+
+                sorted_by_freq = sorted(
+                    numbers, key=lambda n: freq.get(n, 0), reverse=True
+                )
+                hot_pool = sorted_by_freq[:len(numbers) // 2]
+                cold_pool = sorted_by_freq[len(numbers) // 2:]
+
+                if len(hot_pool) < hot_pick:
+                    hot_pick = len(hot_pool)
+                    cold_pick = pick - hot_pick
+                if len(cold_pool) < cold_pick:
+                    cold_pick = len(cold_pool)
+                    hot_pick = pick - cold_pick
+
+                chosen = random.sample(hot_pool, hot_pick) + random.sample(cold_pool, cold_pick)
+                return sorted(chosen)
+
+            return sorted(random.sample(numbers, pick))
+
+        def _weighted_sample(population, weights, k):
+            """Weighted sampling without replacement."""
+            pool = list(zip(population, weights))
+            chosen = []
+            for _ in range(k):
+                total_w = sum(w for _, w in pool)
+                r = random.uniform(0, total_w)
+                cumulative = 0
+                for idx, (item, w) in enumerate(pool):
+                    cumulative += w
+                    if cumulative >= r:
+                        chosen.append(item)
+                        pool.pop(idx)
+                        break
+            return chosen
+
+        # 執行主策略
+        main_results = _run_backtest(strategy)
+
+        # 如果不是 random，同時跑 random 對照
+        comparison = None
+        if strategy != 'random':
+            comparison = _run_backtest('random')
+
+        return Response({
+            "game": game.code,
+            "strategy": strategy,
+            "test_draws": test_draws_count,
+            "simulations_per_draw": simulations,
+            "total_simulations": test_draws_count * simulations,
+            "results": main_results,
+            "comparison": comparison,
         })

@@ -15,8 +15,19 @@ import PairFrequencyChart from '../components/charts/PairFrequencyChart.vue'
 import DataTable from '../components/common/DataTable.vue'
 import RoadMapChart from '../components/charts/RoadMapChart.vue'
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8001/api/v1'
+
 const GAME_CODE = 'daily_cash'
 const POOL_SIZE = 39
+
+const selectedRecent = computed(() => analysisStore.selectedRecent)
+
+function exportDrawsCsv() {
+  window.open(`${API_BASE}/draws/export_csv/?game=${GAME_CODE}`)
+}
+function exportStatsCsv() {
+  window.open(`${API_BASE}/draws/export_stats_csv/?game=${GAME_CODE}&recent=${selectedRecent.value}`)
+}
 
 const trendInput = ref<number | null>(null)
 const trendError = ref<string | null>(null)
@@ -220,7 +231,17 @@ onMounted(async () => {
 
         <!-- 歷史開獎紀錄 -->
         <section class="card full-width-section">
-          <h2><i class="fas fa-history"></i> 歷史開獎紀錄</h2>
+          <div class="section-header">
+            <h2><i class="fas fa-history"></i> 歷史開獎紀錄</h2>
+            <div class="export-btns">
+              <button class="export-btn" @click="exportDrawsCsv">
+                <i class="fas fa-file-csv"></i> 匯出開獎紀錄
+              </button>
+              <button class="export-btn" @click="exportStatsCsv">
+                <i class="fas fa-file-csv"></i> 匯出統計數據
+              </button>
+            </div>
+          </div>
           <DataTable
             :draws="analysisStore.draws"
             :show-special="false"
@@ -382,6 +403,45 @@ h3 { display: flex; align-items: center; gap: var(--spacing-sm); }
   color: var(--color-accent, #E76F51);
   font-size: 0.875rem;
   margin-bottom: var(--spacing-sm);
+}
+
+/* 匯出按鈕 */
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-md);
+}
+.section-header h2 {
+  margin-bottom: 0;
+}
+.export-btns {
+  display: flex;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+}
+.export-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-xs) var(--spacing-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+}
+.export-btn:hover {
+  border-color: var(--color-primary-dark);
+  color: var(--color-text);
+}
+.export-btn i {
+  font-size: 0.85rem;
 }
 
 @media (max-width: 768px) {

@@ -96,6 +96,11 @@ async function handleLogout() {
             <i class="fas fa-check-double"></i> 對獎
           </router-link>
         </li>
+        <li>
+          <router-link to="/backtest" @click="mobileMenuOpen = false">
+            <i class="fas fa-flask"></i> 回測
+          </router-link>
+        </li>
 
         <!-- Auth -->
         <li v-if="!authStore.isLoggedIn">
@@ -108,6 +113,13 @@ async function handleLogout() {
             <i class="fas fa-user-circle"></i>
             {{ authStore.user?.username ?? '使用者' }}
           </span>
+          <router-link
+            to="/my-predictions"
+            class="navbar__bookmark-link"
+            @click="mobileMenuOpen = false"
+          >
+            <i class="fas fa-bookmark"></i> 我的收藏
+          </router-link>
           <button class="navbar__logout-btn" @click="handleLogout">
             <i class="fas fa-sign-out-alt"></i> 登出
           </button>
@@ -224,6 +236,24 @@ async function handleLogout() {
   font-weight: 600;
   font-size: 0.9rem;
   white-space: nowrap;
+}
+
+.navbar__bookmark-link {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  font-weight: 500;
+  font-size: 0.875rem;
+  background-color: rgba(255, 255, 255, 0.15);
+  color: var(--color-text);
+  text-decoration: none;
+  transition: background-color 0.2s ease;
+}
+
+.navbar__bookmark-link:hover {
+  background-color: rgba(255, 255, 255, 0.25);
 }
 
 .navbar__logout-btn {

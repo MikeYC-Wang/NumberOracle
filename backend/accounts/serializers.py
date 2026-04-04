@@ -3,6 +3,9 @@ import re
 from django.contrib.auth.models import User
 from rest_framework import serializers
 
+from lottery.models import LotteryGame
+from .models import SavedPrediction
+
 
 class RegisterSerializer(serializers.Serializer):
     username = serializers.CharField(max_length=150, min_length=3)
@@ -57,3 +60,23 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = ['id', 'username', 'email', 'date_joined']
         read_only_fields = fields
+
+
+class SavedPredictionSerializer(serializers.ModelSerializer):
+    game_code = serializers.SlugRelatedField(
+        source='game',
+        slug_field='code',
+        queryset=LotteryGame.objects.filter(is_active=True),
+    )
+
+    class Meta:
+        model = SavedPrediction
+        fields = [
+            'id', 'game_code', 'numbers', 'special_number',
+            'strategy', 'created_at',
+            'checked_term', 'matched_count', 'special_matched', 'checked_at',
+        ]
+        read_only_fields = [
+            'id', 'created_at',
+            'checked_term', 'matched_count', 'special_matched', 'checked_at',
+        ]

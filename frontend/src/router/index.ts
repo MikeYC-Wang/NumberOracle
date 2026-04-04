@@ -40,6 +40,18 @@ const router = createRouter({
       meta: { title: '對獎' },
     },
     {
+      path: '/backtest',
+      name: 'backtest',
+      component: () => import('../views/BacktestView.vue'),
+      meta: { title: '回測系統' },
+    },
+    {
+      path: '/my-predictions',
+      name: 'my-predictions',
+      component: () => import('../views/MyPredictionsView.vue'),
+      meta: { title: '我的收藏', requiresAuth: true },
+    },
+    {
       path: '/login',
       name: 'login',
       component: () => import('../views/LoginView.vue'),

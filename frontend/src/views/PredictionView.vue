@@ -2,11 +2,15 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useLotteryStore } from '../stores/lotteryStore'
 import { useAnalysisStore } from '../stores/analysisStore'
+import { useAuthStore } from '../stores/authStore'
 import type { LotteryGame } from '../types/lottery'
 import LotteryBall from '../components/common/LotteryBall.vue'
 
 const lotteryStore = useLotteryStore()
 const analysisStore = useAnalysisStore()
+const authStore = useAuthStore()
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8001/api/v1'
 
 // --- 策略定義 ---
 type Strategy = 'random' | 'hot_weighted' | 'cold_weighted' | 'balanced' | 'manual'
@@ -371,6 +375,48 @@ interface PredictionRecord {
 
 const predictionHistory = ref<PredictionRecord[]>([])
 
+// --- 收藏功能 ---
+const savingIndex = ref<number | null>(null)
+const savedIndices = ref<Set<number>>(new Set())
+
+async function savePrediction(record: PredictionRecord, idx: number) {
+  if (!authStore.isLoggedIn) {
+    alert('請先登入')
+    return
+  }
+  if (savedIndices.value.has(idx) || savingIndex.value === idx) return
+
+  savingIndex.value = idx
+  try {
+    const body: Record<string, any> = {
+      game_code: record.gameCode,
+      numbers: record.numbers,
+      strategy: record.strategy,
+    }
+    if (record.special !== null) {
+      body.special_number = record.special
+    }
+    const res = await fetch(`${API_BASE}/auth/predictions/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authStore.getAuthHeaders(),
+      },
+      body: JSON.stringify(body),
+    })
+    if (res.ok) {
+      savedIndices.value = new Set(savedIndices.value.add(idx))
+    } else {
+      const data = await res.json().catch(() => ({}))
+      alert(data.detail || '收藏失敗')
+    }
+  } catch {
+    alert('網路錯誤，無法收藏')
+  } finally {
+    savingIndex.value = null
+  }
+}
+
 function formatTime(date: Date): string {
   const h = String(date.getHours()).padStart(2, '0')
   const m = String(date.getMinutes()).padStart(2, '0')
@@ -710,6 +756,15 @@ onMounted(async () => {
                 />
               </template>
             </div>
+            <button
+              class="bookmark-btn"
+              :class="{ 'bookmark-btn--saved': savedIndices.has(idx) }"
+              :disabled="savingIndex === idx"
+              @click="savePrediction(record, idx)"
+              :title="savedIndices.has(idx) ? '已收藏' : '收藏'"
+            >
+              <i :class="savingIndex === idx ? 'fas fa-spinner fa-spin' : 'fas fa-bookmark'"></i>
+            </button>
           </div>
         </div>
       </div>
@@ -1228,6 +1283,36 @@ h1 i {
   align-items: center;
   gap: var(--spacing-xs);
   flex-wrap: wrap;
+}
+
+/* === 收藏按鈕 === */
+.bookmark-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: color 0.2s, border-color 0.2s, background 0.2s;
+  flex-shrink: 0;
+}
+.bookmark-btn:hover:not(:disabled) {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+.bookmark-btn--saved {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+  background: rgba(231, 111, 81, 0.08);
+}
+.bookmark-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* === TransitionGroup (legacy, kept for compatibility) === */
