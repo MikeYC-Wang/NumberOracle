@@ -1,3 +1,8 @@
+import time
+from collections import defaultdict
+from functools import wraps
+from threading import Lock
+
 from django.contrib.auth import authenticate
 from django.utils import timezone
 from rest_framework import status
@@ -13,10 +18,86 @@ from .serializers import (
     SavedPredictionSerializer,
 )
 
+# ---------------------------------------------------------------------------
+# Rate limiting：優先使用 django-ratelimit，若無法 import 則以記憶體限流降級
+# ---------------------------------------------------------------------------
+try:
+    from django_ratelimit.decorators import ratelimit  # type: ignore
+    from django_ratelimit.exceptions import Ratelimited  # type: ignore
+    _HAS_DJANGO_RATELIMIT = True
+except ImportError:  # pragma: no cover - 套件未安裝時的降級路徑
+    _HAS_DJANGO_RATELIMIT = False
+
+# 記憶體限流器狀態 (降級用)
+_RATE_LIMIT_STATE: dict = defaultdict(list)
+_RATE_LIMIT_LOCK = Lock()
+
+
+def _get_client_ip(request) -> str:
+    xff = request.META.get('HTTP_X_FORWARDED_FOR')
+    if xff:
+        return xff.split(',')[0].strip()
+    return request.META.get('REMOTE_ADDR', 'unknown')
+
+
+def simple_rate_limit(max_calls: int, period_seconds: int = 60):
+    """簡易記憶體限流裝飾器，套用於 APIView.post / get 等方法。"""
+
+    def decorator(view_method):
+        @wraps(view_method)
+        def wrapper(self, request, *args, **kwargs):
+            key = f"{view_method.__qualname__}:{_get_client_ip(request)}"
+            now = time.time()
+            with _RATE_LIMIT_LOCK:
+                timestamps = [
+                    t for t in _RATE_LIMIT_STATE[key]
+                    if now - t < period_seconds
+                ]
+                if len(timestamps) >= max_calls:
+                    _RATE_LIMIT_STATE[key] = timestamps
+                    return Response(
+                        {"error": "請求過於頻繁，請稍後再試。"},
+                        status=status.HTTP_429_TOO_MANY_REQUESTS,
+                    )
+                timestamps.append(now)
+                _RATE_LIMIT_STATE[key] = timestamps
+            return view_method(self, request, *args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+def rate_limit(max_calls: int, period_seconds: int = 60):
+    """統一對外限流裝飾器：有 django-ratelimit 就用它，否則降級。"""
+    if _HAS_DJANGO_RATELIMIT:
+        rate_str = f"{max_calls}/m" if period_seconds == 60 else f"{max_calls}/{period_seconds}s"
+
+        def decorator(view_method):
+            @wraps(view_method)
+            def wrapper(self, request, *args, **kwargs):
+                @ratelimit(key='ip', rate=rate_str, block=False)
+                def _inner(req):
+                    return None
+
+                _inner(request)
+                if getattr(request, 'limited', False):
+                    return Response(
+                        {"error": "請求過於頻繁，請稍後再試。"},
+                        status=status.HTTP_429_TOO_MANY_REQUESTS,
+                    )
+                return view_method(self, request, *args, **kwargs)
+
+            return wrapper
+
+        return decorator
+    return simple_rate_limit(max_calls, period_seconds)
+
 
 class RegisterView(APIView):
     """POST /api/v1/auth/register/"""
 
+    @rate_limit(max_calls=5, period_seconds=60)
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -34,6 +115,7 @@ class RegisterView(APIView):
 class LoginView(APIView):
     """POST /api/v1/auth/login/"""
 
+    @rate_limit(max_calls=10, period_seconds=60)
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -46,7 +128,9 @@ class LoginView(APIView):
                 {"error": "帳號或密碼錯誤。"},
                 status=status.HTTP_401_UNAUTHORIZED,
             )
-        token, _ = Token.objects.get_or_create(user=user)
+        # 刪除舊 token 再建立新的，確保 24 小時有效期從本次登入重新計算
+        Token.objects.filter(user=user).delete()
+        token = Token.objects.create(user=user)
         return Response({
             "token": token.key,
             "user": UserSerializer(user).data,

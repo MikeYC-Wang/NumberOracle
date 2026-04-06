@@ -18,7 +18,7 @@ from django.contrib import admin
 from django.urls import path, include
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
+    path('secure-admin-panel-x9k2/', admin.site.urls),  # 改為不容易被猜到的路徑
     path('api/v1/', include('lottery.urls')),
     path('api/v1/auth/', include('accounts.urls')),
 ]
