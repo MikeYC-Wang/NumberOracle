@@ -104,8 +104,9 @@ async function startBacktest() {
     }
 
     backtestResult.value = await res.json()
+    // 等 DOM 完全渲染後再初始化 ECharts
     await nextTick()
-    renderChart()
+    setTimeout(() => renderChart(), 100)
   } catch (e) {
     backtestError.value = e instanceof Error ? e.message : '回測失敗'
   } finally {
@@ -148,18 +149,22 @@ function renderChart() {
       name: strategyLabel.value,
       type: 'bar',
       data: strategyData,
-      barMaxWidth: 50,
+      barMaxWidth: 40,
+      barGap: '30%',
     },
   ]
 
   if (comparison) {
-    const compData = categories.map(c => comparison.match_distribution[c] ?? 0)
+    const compData = categories.map(c => ({
+      value: comparison.match_distribution[c] ?? 0,
+      itemStyle: { color: 'rgba(178, 190, 195, 0.6)' },
+    }))
     series.push({
       name: '隨機對照',
       type: 'bar',
       data: compData,
-      barMaxWidth: 50,
-      itemStyle: { color: 'rgba(178, 190, 195, 0.5)' },
+      barMaxWidth: 40,
+      barGap: '30%',
     })
   }
 
@@ -168,10 +173,14 @@ function renderChart() {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
     },
-    legend: comparison ? { data: [strategyLabel.value, '隨機對照'] } : undefined,
+    legend: comparison ? {
+      data: [strategyLabel.value, '隨機對照'],
+      top: 0,
+    } : undefined,
     grid: {
       left: '3%',
       right: '4%',
+      top: comparison ? 40 : 24,
       bottom: '3%',
       containLabel: true,
     },
