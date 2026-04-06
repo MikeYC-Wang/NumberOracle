@@ -5,4 +5,7 @@ import { resolve } from 'path'
 export default defineConfig({
   plugins: [vue()],
   envDir: resolve(__dirname, '../'),
+  build: {
+    sourcemap: false,
+  },
 })

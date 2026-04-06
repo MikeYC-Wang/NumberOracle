@@ -1,6 +1,13 @@
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import AppNavbar from './components/layout/AppNavbar.vue'
 import AppFooter from './components/layout/AppFooter.vue'
+import { useAuthStore } from './stores/authStore'
+
+const authStore = useAuthStore()
+onMounted(() => {
+  authStore.initSession()
+})
 </script>
 
 <template>
