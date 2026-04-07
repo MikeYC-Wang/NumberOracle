@@ -1006,24 +1006,14 @@ class DrawResultViewSet(viewsets.ReadOnlyModelViewSet):
                 return sorted(chosen)
 
             elif strat == 'balanced':
-                # 熱門取 ceil(n/2)，冷門取其餘
+                # 決定論版本：取頻率最高 ceil(n/2) 個 + 頻率最低 floor(n/2) 個
                 hot_pick = math.ceil(pick / 2)
                 cold_pick = pick - hot_pick
 
                 sorted_by_freq = sorted(
                     numbers, key=lambda n: freq.get(n, 0), reverse=True
                 )
-                hot_pool = sorted_by_freq[:len(numbers) // 2]
-                cold_pool = sorted_by_freq[len(numbers) // 2:]
-
-                if len(hot_pool) < hot_pick:
-                    hot_pick = len(hot_pool)
-                    cold_pick = pick - hot_pick
-                if len(cold_pool) < cold_pick:
-                    cold_pick = len(cold_pool)
-                    hot_pick = pick - cold_pick
-
-                chosen = random.sample(hot_pool, hot_pick) + random.sample(cold_pool, cold_pick)
+                chosen = sorted_by_freq[:hot_pick] + sorted_by_freq[-cold_pick:] if cold_pick > 0 else sorted_by_freq[:hot_pick]
                 return sorted(chosen)
 
             return sorted(random.sample(numbers, pick))
